@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta
+    name="description"
+    content="Product checkout and order request page for premium workspace customers."
+  >
+  <title>Checkout | ApexLink Global</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  >
+  <script>document.documentElement.classList.add("page-transition-init");</script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/png" href="assets/brand/apexlink-favicon.png">
+</head>
+<body class="checkout-page">
+  <div class="checkout-nav-shell">
+    <div data-public-nav data-nav-id="checkout-navigation"></div>
+  </div>
+
+  <main>
+    <section class="section section-light checkout-section">
+      <div class="container checkout-layout">
+        <section class="checkout-summary reveal">
+          <div class="checkout-panel-head">
+            <div>
+              <p class="eyebrow">Order Summary</p>
+              <h2>Your selected product</h2>
+            </div>
+            <a class="btn btn-outline checkout-back-link" href="/products">Back to Products</a>
+          </div>
+
+          <div class="checkout-product-card" id="checkout-product"></div>
+
+          <div class="checkout-totals" id="checkout-totals"></div>
+        </section>
+
+        <section class="checkout-form-panel reveal">
+          <div class="checkout-panel-head">
+            <div>
+              <p class="eyebrow">Buyer Details</p>
+              <h2>Buyer and shipping details</h2>
+            </div>
+          </div>
+
+          <form class="checkout-form" id="checkout-form">
+            <div class="form-grid">
+              <label>
+                Buyer Name
+                <input type="text" name="buyerName" placeholder="Your name" required>
+              </label>
+              <label>
+                Email
+                <input type="email" name="email" placeholder="Your email" required>
+              </label>
+              <label>
+                Phone
+                <input type="tel" name="phone" placeholder="Your phone number">
+              </label>
+              <label>
+                Country / Region
+                <input type="text" name="country" placeholder="Destination country or region" required>
+              </label>
+            </div>
+
+            <label>
+              Shipping Address
+              <textarea name="address" rows="3" placeholder="Street, city, state, postal code" required></textarea>
+            </label>
+
+            <label>
+              Quantity
+              <input id="quantity-input" type="number" name="quantity" step="1" required>
+            </label>
+            <p class="checkout-quantity-note" id="checkout-quantity-note" aria-live="polite"></p>
+
+            <label>
+              Notes
+              <textarea
+                name="notes"
+                rows="4"
+                placeholder="Share finish, color, quantity split, delivery notes, or workspace requirements"
+              ></textarea>
+            </label>
+
+            <div class="checkout-note-box">
+              <strong>Important</strong>
+              <p>Your order details will be reviewed on the next step before any payment method is selected.</p>
+            </div>
+
+            <button class="btn btn-primary btn-full" type="submit">Continue to Payment</button>
+            <p class="form-status checkout-status" aria-live="polite"></p>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div data-public-footer></div>
+  <div data-support-fab></div>
+
+  <script src="page-transition.js"></script>
+  <script src="data-store.js"></script>
+  <script src="public-shell.js"></script>
+  <script src="site-config.js"></script>
+  <script src="checkout.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<svg width="800" height="800" viewBox="0 0 800 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="800" rx="48" fill="url(#bg)"/>
+  <circle cx="189" cy="177" r="108" fill="#DFF3FF"/>
+  <rect x="228" y="175" width="206" height="392" rx="60" fill="#FFFFFF"/>
+  <rect x="268" y="140" width="126" height="48" rx="24" fill="#D5E8FB"/>
+  <path d="M434 248H487C543.333 248 589 293.667 589 350C589 406.333 543.333 452 487 452H434V406H479C511.033 406 537 380.033 537 348C537 315.967 511.033 290 479 290H434V248Z" fill="#A2C6EA"/>
+  <rect x="266" y="232" width="130" height="24" rx="12" fill="#E7F2FC"/>
+  <rect x="266" y="278" width="100" height="16" rx="8" fill="#D3E6F7"/>
+  <text x="76" y="104" fill="#16304B" font-family="Arial, sans-serif" font-size="34" font-weight="700">Smart Travel Mug</text>
+  <defs>
+    <linearGradient id="bg" x1="87" y1="59" x2="709" y2="729" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FCFF"/>
+      <stop offset="1" stop-color="#E5F0FB"/>
+    </linearGradient>
+  </defs>
+</svg>

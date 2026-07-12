@@ -1,0 +1,16 @@
+<svg width="800" height="800" viewBox="0 0 800 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="800" rx="48" fill="url(#bg)"/>
+  <circle cx="181" cy="164" r="102" fill="#DFF3FF"/>
+  <path d="M252 318C252 231.961 321.961 162 408 162C494.039 162 564 231.961 564 318V577C564 609.033 538.033 635 506 635H310C277.967 635 252 609.033 252 577V318Z" fill="#1D4D89"/>
+  <path d="M314 294C314 242.085 356.085 200 408 200C459.915 200 502 242.085 502 294V336H314V294Z" fill="#2A67B6"/>
+  <rect x="309" y="373" width="198" height="148" rx="28" fill="#F8FBFF"/>
+  <rect x="344" y="414" width="128" height="20" rx="10" fill="#D9ECFF"/>
+  <rect x="344" y="448" width="88" height="16" rx="8" fill="#C7DFF6"/>
+  <text x="76" y="104" fill="#16304B" font-family="Arial, sans-serif" font-size="34" font-weight="700">Minimalist Backpack</text>
+  <defs>
+    <linearGradient id="bg" x1="86" y1="60" x2="710" y2="729" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FCFF"/>
+      <stop offset="1" stop-color="#E5F0FB"/>
+    </linearGradient>
+  </defs>
+</svg>

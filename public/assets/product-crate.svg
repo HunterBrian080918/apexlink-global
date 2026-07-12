@@ -1,0 +1,17 @@
+<svg width="800" height="800" viewBox="0 0 800 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="800" rx="48" fill="url(#bg)"/>
+  <circle cx="196" cy="164" r="108" fill="#E2F4FF"/>
+  <path d="M214 336H586V570C586 603.137 559.137 630 526 630H274C240.863 630 214 603.137 214 570V336Z" fill="#FFFFFF"/>
+  <path d="M248 286H552L586 336H214L248 286Z" fill="#CFE5FA"/>
+  <rect x="256" y="390" width="68" height="116" rx="14" fill="#D8EBFD"/>
+  <rect x="366" y="390" width="68" height="116" rx="14" fill="#D8EBFD"/>
+  <rect x="476" y="390" width="68" height="116" rx="14" fill="#D8EBFD"/>
+  <rect x="256" y="528" width="288" height="20" rx="10" fill="#BBD8F5"/>
+  <text x="76" y="104" fill="#16304B" font-family="Arial, sans-serif" font-size="34" font-weight="700">Foldable Storage Crate</text>
+  <defs>
+    <linearGradient id="bg" x1="88" y1="60" x2="710" y2="729" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FCFF"/>
+      <stop offset="1" stop-color="#E5F0FB"/>
+    </linearGradient>
+  </defs>
+</svg>

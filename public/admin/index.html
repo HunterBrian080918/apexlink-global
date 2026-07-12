@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ApexLink Global Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  >
+  <link rel="stylesheet" href="/admin/admin.css">
+  <link rel="icon" type="image/png" href="/assets/brand/apexlink-favicon.png">
+</head>
+<body class="admin-body">
+  <div class="admin-login-shell" id="admin-login-shell">
+    <section class="admin-login-card">
+      <div class="admin-login-copy">
+        <p class="admin-kicker">ApexLink Global</p>
+        <h1>Admin Dashboard</h1>
+        <p>
+          Manage orders, customers, products, website content, and system settings without touching
+          the codebase.
+        </p>
+      </div>
+
+      <form class="admin-login-form" id="admin-login-form">
+        <label>
+          Email
+          <input type="email" name="email" required>
+        </label>
+        <label>
+          Password
+          <input type="password" name="password" required>
+        </label>
+        <button type="submit">Sign In</button>
+        <p class="admin-login-error" id="admin-login-error" aria-live="polite"></p>
+      </form>
+    </section>
+  </div>
+
+  <div class="admin-shell is-hidden" id="admin-shell">
+    <aside class="admin-sidebar">
+      <a class="admin-brand" href="/">
+        <span class="admin-brand-mark">
+          <img src="/assets/brand/apexlink-mark.png" alt="ApexLink Global mark">
+        </span>
+        <span>
+          <strong>ApexLink</strong>
+          <small>Global</small>
+        </span>
+      </a>
+
+      <nav class="admin-nav" id="admin-nav"></nav>
+    </aside>
+
+    <main class="admin-main">
+      <header class="admin-topbar">
+        <div>
+          <p class="admin-topbar-label" id="admin-section-label">Dashboard</p>
+          <h1 id="admin-section-title">Platform Overview</h1>
+        </div>
+
+        <div class="admin-topbar-actions">
+          <button class="admin-ghost-button" id="admin-theme-toggle" type="button">Dark Mode</button>
+          <button class="admin-ghost-button" id="admin-logout-button" type="button">Logout</button>
+        </div>
+      </header>
+
+      <section class="admin-content" id="admin-content"></section>
+    </main>
+  </div>
+
+  <script src="/data-store.js"></script>
+  <script src="/admin/admin.js"></script>
+</body>
+</html>

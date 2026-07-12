@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta
+    name="description"
+    content="Review your order total and choose a payment method for ApexLink checkout."
+  >
+  <title>Payment | ApexLink Global</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  >
+  <script>document.documentElement.classList.add("page-transition-init");</script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/png" href="assets/brand/apexlink-favicon.png">
+</head>
+<body class="checkout-page payment-page">
+  <div class="checkout-nav-shell">
+    <div data-public-nav data-nav-id="payment-navigation"></div>
+  </div>
+
+  <main>
+    <section class="section section-light checkout-section">
+      <div class="container checkout-layout">
+        <section class="checkout-summary reveal">
+          <div class="checkout-panel-head">
+            <div>
+              <p class="eyebrow">Payment Summary</p>
+              <h2>Review your order</h2>
+            </div>
+            <a class="btn btn-outline checkout-back-link" id="payment-back-link" href="/checkout">Back to Checkout</a>
+          </div>
+
+          <div class="checkout-product-card" id="payment-product"></div>
+          <div class="checkout-totals" id="payment-totals"></div>
+        </section>
+
+        <section class="checkout-form-panel reveal">
+          <div class="checkout-panel-head">
+            <div>
+              <p class="eyebrow">Payment Method</p>
+              <h2>Choose how you want to pay</h2>
+            </div>
+          </div>
+
+          <form class="checkout-form" id="payment-form">
+            <div class="checkout-note-box" id="payment-buyer-details"></div>
+
+            <div class="payment-methods">
+              <p class="checkout-field-label">Available Methods</p>
+              <div class="payment-method-grid" id="payment-method-grid"></div>
+            </div>
+
+            <div class="checkout-note-box">
+              <strong>Important</strong>
+              <p>Review your selected payment method before continuing.</p>
+            </div>
+
+            <button class="btn btn-primary btn-full" type="submit">Confirm Payment Method</button>
+            <p class="form-status checkout-status" id="payment-status" aria-live="polite"></p>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div data-public-footer></div>
+  <div data-support-fab></div>
+
+  <script src="page-transition.js"></script>
+  <script src="data-store.js"></script>
+  <script src="public-shell.js"></script>
+  <script src="site-config.js"></script>
+  <script src="payment.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<svg width="800" height="800" viewBox="0 0 800 800" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="800" height="800" rx="48" fill="url(#bg)"/>
+  <circle cx="611" cy="160" r="104" fill="#E7F6FF"/>
+  <path d="M305 299C305 246.533 347.533 204 400 204C452.467 204 495 246.533 495 299V534C495 586.467 452.467 629 400 629C347.533 629 305 586.467 305 534V299Z" fill="#FFFFFF"/>
+  <ellipse cx="400" cy="304" rx="95" ry="39" fill="#E8F2FB"/>
+  <path d="M372 178C385 161 387 140 380 116" stroke="#A7CDED" stroke-width="12" stroke-linecap="round"/>
+  <path d="M428 178C441 161 443 140 436 116" stroke="#A7CDED" stroke-width="12" stroke-linecap="round"/>
+  <path d="M400 166C412 149 414 126 407 101" stroke="#A7CDED" stroke-width="12" stroke-linecap="round"/>
+  <rect x="336" y="382" width="128" height="128" rx="32" fill="#DCEEFF"/>
+  <text x="76" y="104" fill="#16304B" font-family="Arial, sans-serif" font-size="34" font-weight="700">Ceramic Aroma Diffuser</text>
+  <defs>
+    <linearGradient id="bg" x1="86" y1="60" x2="708" y2="729" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FCFF"/>
+      <stop offset="1" stop-color="#E5F0FB"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta
+    name="description"
+    content="Contact ApexLink Global for product questions, workspace recommendations, and follow-up."
+  >
+  <title>Contact | ApexLink Global</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  >
+  <script>document.documentElement.classList.add("page-transition-init");</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" type="image/png" href="/assets/brand/apexlink-favicon.png">
+</head>
+<body class="contact-page">
+  <header class="hero-shell subpage-shell">
+    <div data-public-nav data-nav-id="contact-navigation"></div>
+  </header>
+
+  <main>
+    <section class="section section-dark contact-page-section">
+      <div class="container contact-grid">
+        <div class="contact-copy reveal">
+          <p class="eyebrow">Contact</p>
+          <h2>Send a message to the team</h2>
+          <p>
+            Prepare an email with your inquiry details so you can contact the team directly today.
+          </p>
+          <ul class="contact-list">
+            <li>Email: <a data-contact-email href="mailto:ApexLink080918@outlook.com">ApexLink080918@outlook.com</a></li>
+          </ul>
+          <div class="contact-actions">
+            <button class="btn btn-secondary" type="button" id="contact-copy-email">Copy Email</button>
+            <a class="btn btn-outline" id="contact-email-link" href="mailto:ApexLink080918@outlook.com">Email Us</a>
+            <a class="btn btn-outline is-hidden" id="contact-whatsapp-link" href="#" target="_blank" rel="noreferrer">WhatsApp</a>
+          </div>
+          <p class="form-status contact-email-status" id="contact-email-status" aria-live="polite"></p>
+        </div>
+
+        <form class="contact-form reveal">
+          <label>
+            Name
+            <input type="text" name="name" placeholder="Your name" required>
+          </label>
+          <label>
+            Email
+            <input type="email" name="email" placeholder="Your email" required>
+          </label>
+          <label>
+            Subject
+            <input type="text" name="subject" placeholder="What is your inquiry about?" required>
+          </label>
+          <label>
+            Company
+            <input type="text" name="company" placeholder="Your company (optional)">
+          </label>
+          <label>
+            Phone
+            <input type="text" name="phone" placeholder="Your phone number (optional)">
+          </label>
+          <label>
+            Country / Region
+            <input type="text" name="country" placeholder="Your country or market">
+          </label>
+          <label>
+            Message
+            <textarea name="message" rows="5" placeholder="Share your workspace needs, quantity, preferred materials, or customization request" required></textarea>
+          </label>
+          <button class="btn btn-primary btn-full" type="submit">Prepare Email</button>
+          <p class="form-status" aria-live="polite"></p>
+          <p class="form-note">Draft saved locally in this browser only. Your inquiry is not sent until you send the prepared email.</p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <div data-public-footer></div>
+  <div data-support-fab></div>
+
+  <script src="/page-transition.js"></script>
+  <script src="/data-store.js"></script>
+  <script src="/public-shell.js"></script>
+  <script src="/site-config.js"></script>
+  <script src="/contact.js"></script>
+</body>
+</html>

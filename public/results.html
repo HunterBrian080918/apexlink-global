@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta
+    name="description"
+    content="Workspace product results ranked by budget fit, delivery timing, and product relevance."
+  >
+  <title>Product Recommendations | ApexLink Global</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  >
+  <script>document.documentElement.classList.add("page-transition-init");</script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/png" href="assets/brand/apexlink-favicon.png">
+</head>
+<body class="results-page">
+  <header class="hero-shell results-shell">
+    <div class="hero-overlay results-overlay" aria-hidden="true"></div>
+    <div data-public-nav data-nav-id="results-navigation"></div>
+
+    <section class="results-hero container">
+      <div class="results-hero-copy reveal">
+        <p class="eyebrow">Product Recommendations</p>
+        <h1>Your Recommended Workspace Products</h1>
+        <p class="hero-text">
+          Based on your budget, delivery window and product preferences.
+        </p>
+      </div>
+    </section>
+  </header>
+
+  <main>
+    <section class="section section-light results-section">
+      <div class="container">
+        <div class="results-summary-wrap reveal">
+          <div class="results-summary-head">
+            <div>
+              <p class="eyebrow">Search Summary</p>
+              <h2>Review your selection criteria</h2>
+            </div>
+            <a class="btn btn-outline results-back-link" href="/products?aiMatch=open">Edit Search</a>
+          </div>
+
+          <div class="results-summary-grid" id="results-summary"></div>
+        </div>
+
+        <div class="results-state" id="results-state"></div>
+        <div class="results-grid" id="results-grid"></div>
+      </div>
+    </section>
+
+    <section class="section section-accent">
+      <div class="container">
+        <div class="results-insights reveal">
+          <p class="eyebrow">Why These Products Were Recommended</p>
+          <h2>Recommendation logic focused on practical workspace fit</h2>
+          <div class="results-insight-list" id="results-insights"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div data-public-footer></div>
+  <div data-support-fab></div>
+
+  <script src="page-transition.js"></script>
+  <script src="data-store.js"></script>
+  <script src="public-shell.js"></script>
+  <script src="site-config.js"></script>
+  <script src="matching.js"></script>
+  <script src="results.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "apexlink-global",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ApexLink Global B2B commerce website",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node scripts/check-syntax.js",
+    "migrate:admin-auth": "node scripts/migrate-admin-auth-to-supabase.js"
+  },
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.2"
+  }
+}

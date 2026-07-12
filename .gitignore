@@ -1,0 +1,29 @@
+.env
+.env.*
+!.env.example
+node_modules/
+logs/
+*.log
+data/admin-auth.json
+# Runtime
+.server.pid
+*.pid
+
+# Temporary
+.tmp-*
+tmp-*/
+*.tmp
+
+# Performance / benchmark
+order-perf.err
+
+# Netlify local
+.netlify/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local administrator authentication files
+data/admin-auth.json
+data/admin-auth.json.*

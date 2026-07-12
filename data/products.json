@@ -1,0 +1,255 @@
+[
+  {
+    "id": "led-desk-lamp",
+    "slug": "led-desk-lamp",
+    "name": "Foldable Workspace Dock",
+    "category": "Workspace Essentials",
+    "image": "",
+    "priceValue": 0,
+    "price": "$0.00",
+    "moqValue": 1,
+    "moq": "1 units",
+    "shippingDays": 1,
+    "shippingTime": "1 days",
+    "stock": 1,
+    "status": "active",
+    "b2c": {
+      "enabled": true,
+      "retailPrice": 0,
+      "compareAtPrice": 0,
+      "retailStock": 0,
+      "minimumQuantity": 1
+    },
+    "b2b": {
+      "enabled": true,
+      "wholesaleMoq": 1,
+      "wholesaleLeadTime": 1,
+      "priceTiers": [],
+      "depositTerms": "30% Deposit, 70% Before Shipment",
+      "deposit": {
+        "required": false,
+        "type": "percentage",
+        "value": 0,
+        "balanceDueStage": "before-shipment",
+        "customPaymentTerms": "30% Deposit, 70% Before Shipment",
+        "refundable": false,
+        "notes": ""
+      }
+    },
+    "description": "NB",
+    "detailDescription": "Compact, modular and built for productivity wherever you work.",
+    "seoTitle": "",
+    "metaDescription": "",
+    "keywords": [],
+    "functions": [],
+    "scenarios": [],
+    "markets": [],
+    "tags": [],
+    "specs": {},
+    "detailImages": [],
+    "createdAt": "2026-07-11T05:24:18.707Z",
+    "updatedAt": "2026-07-11T05:24:18.707Z"
+  },
+  {
+    "id": "travel-water-bottle",
+    "name": "Travel Water Bottle",
+    "category": "Travel Accessories",
+    "priceValue": 22.99,
+    "price": "$22.99",
+    "image": "assets/images/travel-mug.png",
+    "description": "Insulated travel bottle with carry handle, secure locking lid, and all-day temperature retention.",
+    "functions": [
+      "Vacuum insulation for hot or cold beverage retention",
+      "Portable carry handle for travel and outdoor convenience",
+      "Leak-resistant locking lid for commuting and movement",
+      "Clean matte finish suitable for gift and lifestyle retail"
+    ],
+    "scenarios": [
+      "Commuting",
+      "Outdoor travel",
+      "Gym carry",
+      "Gift and lifestyle retail"
+    ],
+    "detailDescription": "This insulated travel water bottle is a practical SKU for lifestyle, commuting, and travel categories. The secure handle-top lid and streamlined matte body give it a premium look, while the durable insulated construction makes it suitable for everyday carry, road trips, and light outdoor use.",
+    "moqValue": 300,
+    "moq": "300 units",
+    "shippingDays": 15,
+    "shippingTime": "10-15 days",
+    "markets": [
+      "Japan",
+      "Europe",
+      "North America",
+      "Middle East"
+    ],
+    "tags": [
+      "water bottle",
+      "travel",
+      "insulated",
+      "drinkware",
+      "commute",
+      "vacuum flask"
+    ],
+    "specs": {
+      "Material": "304 Stainless Steel",
+      "Capacity": "650ml",
+      "Lid": "Locking Carry Handle Cap",
+      "Insulation": "Hot & Cold Retention",
+      "Finish": "Matte Powder Coating",
+      "Packaging": "Color Box"
+    },
+    "detailImages": [
+      {
+        "id": "travel-bottle-main",
+        "title": "Product View",
+        "text": "Commercial hero image used in the main catalog.",
+        "url": "assets/images/travel-mug.png"
+      },
+      {
+        "id": "travel-bottle-scene",
+        "title": "Usage Scene",
+        "text": "Suitable for gift, commuting, and travel positioning.",
+        "url": "assets/images/travel-mug.png"
+      },
+      {
+        "id": "travel-bottle-detail",
+        "title": "Detail View",
+        "text": "Highlights carry handle and insulated construction.",
+        "url": "assets/images/travel-mug.png"
+      }
+    ]
+  },
+  {
+    "id": "car-seat-organizer-bag",
+    "name": "Car Seat Organizer Bag",
+    "category": "Car Accessories",
+    "priceValue": 27.99,
+    "price": "$27.99",
+    "image": "assets/images/car-seat-organizer.png",
+    "description": "Backseat organizer with multiple pockets for tablets, bottles, tissues, cables, and daily car essentials.",
+    "functions": [
+      "Multi-pocket storage for daily travel accessories",
+      "Keeps tablets, phones, and tissues within reach",
+      "Hanging seat-back installation for quick setup",
+      "Helps reduce backseat clutter for family and ride-share use"
+    ],
+    "scenarios": [
+      "Family vehicles",
+      "Road trips",
+      "Ride-share cars",
+      "Car accessory stores"
+    ],
+    "detailDescription": "This car seat organizer bag is built for practical everyday vehicle storage. Its layered pocket layout supports tablets, tissue packs, drink bottles, charging cables, and personal accessories, making it a good fit for family travel, ride-share use, and organized commuting.",
+    "moqValue": 250,
+    "moq": "250 units",
+    "shippingDays": 22,
+    "shippingTime": "15-22 days",
+    "markets": [
+      "North America",
+      "Europe",
+      "Middle East"
+    ],
+    "tags": [
+      "car organizer",
+      "seat bag",
+      "storage",
+      "automotive",
+      "travel",
+      "backseat"
+    ],
+    "specs": {
+      "Material": "Oxford Fabric + Mesh",
+      "Installation": "Seat-Back Strap Mount",
+      "Storage": "Multi-Pocket Layout",
+      "Features": "Tissue Slot + Bottle Holder + Tablet Pocket",
+      "UseCase": "Passenger Seat Organization",
+      "Packaging": "OPP Bag / Insert Card"
+    },
+    "detailImages": [
+      {
+        "id": "car-organizer-main",
+        "title": "Product View",
+        "text": "Flat-lay product image for product page and sales deck use.",
+        "url": "assets/images/car-seat-organizer.png"
+      },
+      {
+        "id": "car-organizer-scene",
+        "title": "Usage Scene",
+        "text": "Shows the product in family and travel use cases.",
+        "url": "assets/images/car-seat-organizer.png"
+      },
+      {
+        "id": "car-organizer-detail",
+        "title": "Detail View",
+        "text": "Focuses on pocket layout and hanging design.",
+        "url": "assets/images/car-seat-organizer.png"
+      }
+    ]
+  },
+  {
+    "id": "trekking-poles",
+    "name": "Trekking Poles",
+    "category": "Outdoor Gear",
+    "priceValue": 44.99,
+    "price": "$44.99",
+    "image": "assets/images/trekking-poles.png",
+    "description": "Adjustable trekking poles with ergonomic grips, quick-lock sections, and trail-ready stability support.",
+    "functions": [
+      "Adjustable height for different users and terrains",
+      "Ergonomic grip with wrist strap for hiking comfort",
+      "Section locks for stable setup during mountain use",
+      "Improves balance and joint support on uneven trails"
+    ],
+    "scenarios": [
+      "Mountain trekking",
+      "Trail hiking",
+      "Outdoor adventure retail",
+      "Travel sports gear"
+    ],
+    "detailDescription": "These trekking poles combine lightweight portability with dependable support for active outdoor use. The adjustable structure and ergonomic grip make them easy to carry, simple to use, and well suited to travel, walking, and weekend adventure routines.",
+    "moqValue": 180,
+    "moq": "180 units",
+    "shippingDays": 24,
+    "shippingTime": "16-24 days",
+    "markets": [
+      "Europe",
+      "North America",
+      "Australia"
+    ],
+    "tags": [
+      "trekking poles",
+      "hiking poles",
+      "outdoor",
+      "trail",
+      "mountain",
+      "camping"
+    ],
+    "specs": {
+      "Material": "Aluminum Alloy",
+      "Adjustment": "Multi-Section Locking Structure",
+      "Grip": "Foam Ergonomic Handle",
+      "Accessories": "Wrist Straps + Baskets",
+      "UseCase": "Hiking / Trekking / Mountain Walks",
+      "Packaging": "Pair Pack"
+    },
+    "detailImages": [
+      {
+        "id": "trekking-poles-main",
+        "title": "Product View",
+        "text": "Hero image for outdoor catalog and quotation sheets.",
+        "url": "assets/images/trekking-poles.png"
+      },
+      {
+        "id": "trekking-poles-scene",
+        "title": "Usage Scene",
+        "text": "Supports trekking and mountain retail storytelling.",
+        "url": "assets/images/trekking-poles.png"
+      },
+      {
+        "id": "trekking-poles-detail",
+        "title": "Detail View",
+        "text": "Highlights grip, sections, and locking structure.",
+        "url": "assets/images/trekking-poles.png"
+      }
+    ]
+  }
+]

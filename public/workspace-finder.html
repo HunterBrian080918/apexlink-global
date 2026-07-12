@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta
+    name="description"
+    content="Use the workspace finder to compare products by budget, delivery window, and workspace needs."
+  >
+  <title>Workspace Finder | ApexLink Global</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  >
+  <script>document.documentElement.classList.add("page-transition-init");</script>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" type="image/png" href="/assets/brand/apexlink-favicon.png">
+</head>
+<body class="ai-match-page">
+  <header class="hero-shell support-shell">
+    <div class="hero-overlay support-overlay" aria-hidden="true"></div>
+    <div data-public-nav data-nav-id="workspace-finder-navigation"></div>
+
+    <section class="support-hero container">
+      <div class="support-hero-copy reveal">
+        <p class="eyebrow">Workspace Finder</p>
+        <h1>Describe your workspace needs and get recommendations in seconds</h1>
+        <p class="hero-text">
+          Compare products by category, target budget, delivery window, and workspace preferences
+          using the live catalog managed from the admin data source.
+        </p>
+      </div>
+    </section>
+  </header>
+
+  <main>
+    <section class="section section-light">
+      <div class="container">
+        <div class="match-shell reveal">
+          <div class="match-intro">
+            <p class="eyebrow">Workspace Finder</p>
+            <h2>Compare workspace options by the details that matter most</h2>
+            <p>
+              This workflow reads live product data instead of hard-coded arrays, so the
+              recommendations stay aligned with the current catalog, pricing, minimum order, and
+              delivery information.
+            </p>
+            <div class="hero-trust hero-trust-dark">
+              <span>Budget Fit</span>
+              <span>Workspace Style</span>
+              <span>Delivery Planning</span>
+            </div>
+          </div>
+
+          <div class="match-form-wrap">
+            <form class="match-form" id="match-form" action="/products" method="get">
+              <div class="form-grid">
+                <label>
+                  Product Type / Category
+                  <input type="text" name="productType" placeholder="e.g. Desk accessories, lighting, organization">
+                </label>
+                <label>
+                  Work Style / Setup
+                  <input type="text" name="targetRegion" placeholder="e.g. Home office, studio desk, hybrid workspace">
+                </label>
+                <label>
+                  Min Price
+                  <input type="number" name="minPrice" min="0" step="0.01" placeholder="20">
+                </label>
+                <label>
+                  Max Price
+                  <input type="number" name="maxPrice" min="0" step="0.01" placeholder="50">
+                </label>
+                <label>
+                  Max Delivery Time (Days)
+                  <input type="number" name="maxShippingTime" min="1" step="1" placeholder="20">
+                </label>
+                <label>
+                  Minimum Order Preference
+                  <input type="number" name="maxMoq" min="1" step="1" placeholder="300">
+                </label>
+              </div>
+
+              <label>
+                Notes
+                <textarea
+                  name="notes"
+                  rows="4"
+                  placeholder="Tell us about preferred materials, aesthetic, desk size, daily workflow, or product use"
+                ></textarea>
+              </label>
+
+              <button class="btn btn-primary" type="submit">Show My Matches</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div data-public-footer></div>
+  <div data-support-fab></div>
+
+  <script src="/page-transition.js"></script>
+  <script src="/data-store.js"></script>
+  <script src="/public-shell.js"></script>
+  <script src="/site-config.js"></script>
+  <script src="/matching.js"></script>
+  <script src="/ai-match.js"></script>
+</body>
+</html>

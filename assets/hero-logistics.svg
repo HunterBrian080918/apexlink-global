@@ -1,0 +1,47 @@
+<svg width="1600" height="1000" viewBox="0 0 1600 1000" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <g opacity="0.35">
+    <path d="M84 148C240 86 392 74 562 116C719 154 844 219 960 307C1060 382 1121 456 1231 507C1330 553 1458 566 1600 518" stroke="#CFE9FF" stroke-width="2" stroke-dasharray="10 10"/>
+    <path d="M0 576C155 522 286 522 426 555C589 594 725 688 845 742C1057 839 1325 858 1600 783" stroke="#8FD6FF" stroke-width="2" stroke-dasharray="10 10"/>
+  </g>
+  <g opacity="0.15">
+    <circle cx="1260" cy="222" r="230" fill="#8FD6FF"/>
+    <circle cx="366" cy="764" r="270" fill="#0C5ED7"/>
+  </g>
+  <g opacity="0.45">
+    <path d="M248 389L330 316L412 391L507 300L584 353L639 296L732 352" stroke="#F4FBFF" stroke-width="3"/>
+    <path d="M248 421H734" stroke="#F4FBFF" stroke-width="2" stroke-linecap="round"/>
+    <path d="M248 452H668" stroke="#C8E5FF" stroke-width="2" stroke-linecap="round"/>
+  </g>
+  <g opacity="0.9">
+    <path d="M826 684H1185L1246 716H1334C1357 716 1378 731 1387 752L1404 791H1454C1488 791 1516 818 1516 852V865H771V838C771 754 839 684 923 684H826Z" fill="#F5FAFF"/>
+    <path d="M897 633H1126L1178 684H846L897 633Z" fill="#DCEBFA"/>
+    <rect x="874" y="586" width="50" height="47" rx="4" fill="#A8D7FF"/>
+    <rect x="939" y="586" width="50" height="47" rx="4" fill="#B9E0FF"/>
+    <rect x="1004" y="586" width="50" height="47" rx="4" fill="#A8D7FF"/>
+    <rect x="1069" y="586" width="50" height="47" rx="4" fill="#B9E0FF"/>
+    <rect x="872" y="535" width="248" height="39" rx="5" fill="#E7F2FC"/>
+    <circle cx="923" cy="864" r="31" fill="#143C6B"/>
+    <circle cx="1308" cy="864" r="31" fill="#143C6B"/>
+    <path d="M1247 716H1340L1367 791H1247V716Z" fill="#D3E6F7"/>
+  </g>
+  <g opacity="0.95">
+    <path d="M1032 260L1105 199L1177 260H1139V331H1068V260H1032Z" fill="#D9EEFF"/>
+    <path d="M1162 302C1233 302 1289 356 1289 424C1289 492 1233 547 1162 547H1010C943 547 889 495 889 431C889 370 934 319 993 312C1012 265 1056 232 1108 232C1167 232 1218 275 1236 334C1214 314 1188 302 1162 302Z" fill="#F6FBFF"/>
+    <path d="M952 518L996 560L1089 479" stroke="#1D79F2" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <g opacity="0.35">
+    <rect x="188" y="667" width="270" height="145" rx="22" fill="#F7FBFF"/>
+    <rect x="215" y="700" width="112" height="18" rx="9" fill="#D6EBFF"/>
+    <rect x="215" y="734" width="192" height="12" rx="6" fill="#C2DEFA"/>
+    <rect x="215" y="758" width="162" height="12" rx="6" fill="#C2DEFA"/>
+    <rect x="215" y="782" width="126" height="12" rx="6" fill="#C2DEFA"/>
+  </g>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1600" y2="1000" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#082855"/>
+      <stop offset="0.55" stop-color="#0E5DAF"/>
+      <stop offset="1" stop-color="#093462"/>
+    </linearGradient>
+  </defs>
+</svg>

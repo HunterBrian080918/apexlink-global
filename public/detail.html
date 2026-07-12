@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta
+    name="description"
+    content="Detailed product information including pricing, specifications, minimum order, and delivery timing."
+  >
+  <title>Product Detail | ApexLink Global</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
+    rel="stylesheet"
+  >
+  <script>document.documentElement.classList.add("page-transition-init");</script>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" type="image/png" href="assets/brand/apexlink-favicon.png">
+</head>
+<body class="detail-page">
+  <header class="hero-shell detail-shell">
+    <div data-public-nav data-nav-id="detail-navigation"></div>
+  </header>
+
+  <main>
+    <section class="detail-section">
+      <div class="container" id="product-detail"></div>
+    </section>
+
+    <section class="detail-form-section" id="inquiry">
+      <div class="container detail-form-shell">
+        <div class="detail-form-copy reveal">
+          <p class="eyebrow">Inquiry</p>
+          <h2>Contact the team about this product</h2>
+          <p>
+            This form now saves directly into the admin request system so the team can view customer,
+            location, quantity, and follow-up status in one place.
+          </p>
+          <p>
+            Suggested use: collect target quantity, customization requests, delivery destination,
+            finish preferences, and preferred response time.
+          </p>
+        </div>
+
+        <form class="detail-form reveal">
+          <label>
+            Name
+            <input type="text" name="name" placeholder="Your name" required>
+          </label>
+          <label>
+            Email
+            <input type="email" name="email" placeholder="Your email" required>
+          </label>
+          <label>
+            Country / Region
+            <input type="text" name="country" placeholder="Destination country or region">
+          </label>
+          <label>
+            Quantity
+            <input type="text" name="quantity" placeholder="e.g. 300 units">
+          </label>
+          <label>
+            Message
+            <textarea name="message" rows="5" placeholder="Share finish, quantity, setup needs, destination, and timing requirements"></textarea>
+          </label>
+          <button class="btn btn-primary btn-full" type="submit">Contact Team</button>
+          <p class="form-status" aria-live="polite"></p>
+          <p class="form-note">Submitted requests are visible in `/admin` under Orders / Inquiries.</p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <div data-public-footer></div>
+  <div data-support-fab></div>
+
+  <script src="page-transition.js"></script>
+  <script src="data-store.js"></script>
+  <script src="public-shell.js"></script>
+  <script src="site-config.js"></script>
+  <script src="detail.js"></script>
+</body>
+</html>
