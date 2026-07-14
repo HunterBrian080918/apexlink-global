@@ -103,6 +103,16 @@ const normalizeBrandBottom = (value, fallback = "") => {
   const normalized = String(value ?? "").trim();
   return !normalized || normalized === "Global" ? fallback : normalized;
 };
+const normalizePublicEmail = (value, fallback = "avelixlink@outlook.com") => {
+  const normalized = String(value ?? "").trim();
+  return !normalized || normalized === "sales@apexlinkglobal.com" || normalized === "ApexLink080918@outlook.com"
+    ? fallback
+    : normalized;
+};
+const normalizePublicWhatsapp = (value, fallback = "+44 7597 653224") => {
+  const normalized = String(value ?? "").trim();
+  return !normalized || normalized === "+86 138 0000 2211" ? fallback : normalized;
+};
 const asNullableText = (value) => {
   const normalized = String(value ?? "").trim();
   return normalized || null;
@@ -178,13 +188,13 @@ const buildDefaultSiteConfig = () => {
         copyright: asText(footer.copyright, "© 2026 AvelixLink. All rights reserved."),
       },
       contact: {
-        email: asText(contact.email, "ApexLink080918@outlook.com"),
+        email: normalizePublicEmail(contact.email, "avelixlink@outlook.com"),
         phone: asText(contact.phone),
         address: asText(contact.address),
       },
       social: {
         linkedin: asText(social.linkedin),
-        whatsapp: asText(social.whatsapp),
+        whatsapp: normalizePublicWhatsapp(social.whatsapp, "+44 7597 653224"),
         instagram: asText(social.instagram),
         x: asText(social.x),
       },
@@ -280,13 +290,13 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
         copyright: asText(websiteRow?.footer_copyright, defaults.website.footer.copyright),
       },
       contact: {
-        email: asText(websiteRow?.contact_email, defaults.website.contact.email),
+        email: normalizePublicEmail(websiteRow?.contact_email, defaults.website.contact.email),
         phone: asText(websiteRow?.contact_phone, defaults.website.contact.phone),
         address: asText(websiteRow?.contact_address, defaults.website.contact.address),
       },
       social: {
         linkedin: asText(websiteRow?.social_linkedin, defaults.website.social.linkedin),
-        whatsapp: asText(websiteRow?.social_whatsapp, defaults.website.social.whatsapp),
+        whatsapp: normalizePublicWhatsapp(websiteRow?.social_whatsapp, defaults.website.social.whatsapp),
         instagram: asText(websiteRow?.social_instagram, defaults.website.social.instagram),
         x: asText(websiteRow?.social_x, defaults.website.social.x),
       },

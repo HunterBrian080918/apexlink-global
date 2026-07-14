@@ -62,13 +62,13 @@
         copyright: "© 2026 AvelixLink. All rights reserved.",
       },
       contact: {
-        email: "ApexLink080918@outlook.com",
+        email: "avelixlink@outlook.com",
         phone: "",
         address: "",
       },
       social: {
         linkedin: "",
-        whatsapp: "",
+        whatsapp: "+44 7597 653224",
         instagram: "",
         x: "",
       },
@@ -342,7 +342,9 @@
   };
   const normalizeEmailContact = (value) => {
     const email = String(value || "").trim();
-    return !email || email === "sales@apexlinkglobal.com" ? "ApexLink080918@outlook.com" : email;
+    return !email || ["sales@apexlinkglobal.com", "ApexLink080918@outlook.com"].includes(email)
+      ? "avelixlink@outlook.com"
+      : email;
   };
   const normalizeOptionalContactValue = (value, legacyValues = []) => {
     const normalized = String(value || "").trim();
@@ -817,7 +819,10 @@
       },
       social: {
         linkedin: String(social.linkedin || ""),
-        whatsapp: normalizeOptionalContactValue(social.whatsapp, ["+86 138 0000 2211"]),
+        whatsapp: useUpdatedCopy(
+          normalizeOptionalContactValue(social.whatsapp, ["+86 138 0000 2211"]),
+          "+44 7597 653224"
+        ),
         instagram: String(social.instagram || ""),
         x: String(social.x || ""),
       },

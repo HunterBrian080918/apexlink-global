@@ -140,7 +140,7 @@
         <div class="footer-brand-block">
           <strong class="footer-brand-title">AvelixLink</strong>
           <p class="footer-tagline">Better Workspace. Better Work.</p>
-          <p class="footer-email">Email: ApexLink080918@outlook.com</p>
+          <p class="footer-email">Email: avelixlink@outlook.com</p>
           <p class="footer-copyright">&copy; 2026 AvelixLink. All rights reserved.</p>
         </div>
         <nav class="footer-links" aria-label="Legal and policy links">

@@ -13,7 +13,7 @@ const emailStatus = document.querySelector("#contact-email-status");
 const contactEmailNodes = document.querySelectorAll("[data-contact-email]");
 
 const CONTACT_DRAFT_KEY = "apexlink-contact-draft-v1";
-const DEFAULT_BUSINESS_EMAIL = "ApexLink080918@outlook.com";
+const DEFAULT_BUSINESS_EMAIL = "avelixlink@outlook.com";
 
 const syncNavbarState = () => {
   if (!navbar) {
