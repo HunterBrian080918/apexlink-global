@@ -1,8 +1,8 @@
 {
-  "name": "apexlink-global",
+  "name": "avelixlink",
   "version": "1.0.0",
   "private": true,
-  "description": "ApexLink Global B2B commerce website",
+  "description": "AvelixLink B2B commerce website",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

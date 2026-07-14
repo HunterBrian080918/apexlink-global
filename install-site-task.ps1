@@ -1,7 +1,7 @@
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $node = "C:\Program Files\nodejs\node.exe"
 $serverScript = Join-Path $root "server.js"
-$taskName = "ApexLinkLocalSite"
+$taskName = "AvelixLinkLocalSite"
 $startScript = Join-Path $root "start-site.ps1"
 $stopScript = Join-Path $root "stop-site.ps1"
 

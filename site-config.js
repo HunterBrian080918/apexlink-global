@@ -31,6 +31,14 @@
 
     return LOGO_FALLBACK_SRC;
   };
+  const normalizeBrandName = (value, fallback = "AvelixLink") => {
+    const normalized = String(value || "").trim();
+    return !normalized || normalized === "ApexLink Global" || normalized === "ApexLink" ? fallback : normalized;
+  };
+  const normalizeBrandBottom = (value) => {
+    const normalized = String(value || "").trim();
+    return !normalized || normalized === "Global" ? "" : normalized;
+  };
 
   const getSiteConfig = async (options = {}) => {
     if (siteConfigCache && !options.force) {
@@ -76,7 +84,9 @@
       const footer = website.footer || {};
       const contact = website.contact || {};
       const seo = website.seo || {};
-      const brandName = brand.name || "ApexLink Global";
+      const brandName = normalizeBrandName(brand.name);
+      const logoTop = normalizeBrandName(brand.logoTop, "AvelixLink");
+      const logoBottom = normalizeBrandBottom(brand.logoBottom);
 
       document.querySelectorAll('link[rel~="icon"]').forEach((node) => {
         if (brand.favicon) {
@@ -114,11 +124,11 @@
         }
 
         if (topLine) {
-          topLine.textContent = brand.logoTop || "ApexLink";
+          topLine.textContent = logoTop;
         }
 
         if (bottomLine) {
-          bottomLine.textContent = brand.logoBottom || "Global";
+          bottomLine.textContent = logoBottom;
         }
       });
 
@@ -130,7 +140,7 @@
         const copyrightNode = footerRoot.querySelector(".footer-copyright");
 
         if (brandTitle) {
-          brandTitle.textContent = brand.logoTop || "ApexLink";
+          brandTitle.textContent = logoTop;
         }
 
         if (taglineNode) {

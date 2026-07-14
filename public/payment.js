@@ -450,7 +450,7 @@ const initPaymentPage = async () => {
     return;
   }
 
-  document.title = `Payment | ${website?.brand?.name || "ApexLink Global"}`;
+  document.title = `Payment | ${website?.brand?.name || "AvelixLink"}`;
   currentPayments = await fetchOrderPayments(currentOrder.id);
   if (backLink) {
     backLink.href = buildCheckoutUrl(currentOrder);

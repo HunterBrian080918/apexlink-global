@@ -94,13 +94,13 @@
 
   const getNavMarkup = (navId) => `
     <nav class="navbar container">
-      <a class="logo" href="${ROUTES.home}" aria-label="ApexLink Global Home">
+      <a class="logo" href="${ROUTES.home}" aria-label="AvelixLink Home">
         <span class="logo-mark">
-          <img src="/assets/brand/apexlink-mark.png" alt="ApexLink Global mark">
+          <img src="/assets/brand/apexlink-mark.png" alt="AvelixLink mark">
         </span>
         <span class="logo-text">
-          <strong>ApexLink</strong>
-          <span>Global</span>
+          <strong>AvelixLink</strong>
+          <span></span>
         </span>
       </a>
 
@@ -138,10 +138,10 @@
     <footer class="site-footer">
       <div class="container footer-content">
         <div class="footer-brand-block">
-          <strong class="footer-brand-title">ApexLink</strong>
+          <strong class="footer-brand-title">AvelixLink</strong>
           <p class="footer-tagline">Better Workspace. Better Work.</p>
           <p class="footer-email">Email: ApexLink080918@outlook.com</p>
-          <p class="footer-copyright">&copy; 2026 ApexLink. All rights reserved.</p>
+          <p class="footer-copyright">&copy; 2026 AvelixLink. All rights reserved.</p>
         </div>
         <nav class="footer-links" aria-label="Legal and policy links">
           <a href="${ROUTES.terms}">Terms</a>

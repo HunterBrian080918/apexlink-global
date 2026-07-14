@@ -2311,7 +2311,7 @@ const server = http.createServer(async (request, response) => {
     if ((requestUrl.pathname === "/health" || requestUrl.pathname === "/api/health") && request.method === "GET") {
       sendJson(response, 200, {
         status: "ok",
-        service: "apexlink-global",
+        service: "avelixlink",
         timestamp: nowIso(),
       });
       return;

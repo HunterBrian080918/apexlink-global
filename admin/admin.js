@@ -1026,13 +1026,13 @@ const MEDIA_USAGE_OPTIONS = [
 ];
 const MEDIA_FOLDER_OPTIONS = [
   { value: "all", label: "All Folders" },
-  { value: "apexlink/products", label: "apexlink/products" },
-  { value: "apexlink/products/gallery", label: "apexlink/products/gallery" },
-  { value: "apexlink/brand", label: "apexlink/brand" },
-  { value: "apexlink/homepage", label: "apexlink/homepage" },
-  { value: "apexlink/about", label: "apexlink/about" },
-  { value: "apexlink/support", label: "apexlink/support" },
-  { value: "apexlink/misc", label: "apexlink/misc" },
+  { value: "apexlink/products", label: "avelixlink/products" },
+  { value: "apexlink/products/gallery", label: "avelixlink/products/gallery" },
+  { value: "apexlink/brand", label: "avelixlink/brand" },
+  { value: "apexlink/homepage", label: "avelixlink/homepage" },
+  { value: "apexlink/about", label: "avelixlink/about" },
+  { value: "apexlink/support", label: "avelixlink/support" },
+  { value: "apexlink/misc", label: "avelixlink/misc" },
 ];
 const CLOUDINARY_URL_PREFIX = "https://res.cloudinary.com/";
 const LOGO_FALLBACK_SRC = "/assets/brand/apexlink-mark.png";
@@ -1479,9 +1479,18 @@ const applyTheme = () => {
 
 const applyBrand = (website) => {
   const brand = website?.brand || {};
-  const brandName = brand.name || "ApexLink Global";
-  const logoTop = brand.logoTop || "ApexLink";
-  const logoBottom = brand.logoBottom || "Global";
+  const brandName =
+    !String(brand.name || "").trim() || ["ApexLink Global", "ApexLink"].includes(String(brand.name || "").trim())
+      ? "AvelixLink"
+      : String(brand.name || "").trim();
+  const logoTop =
+    !String(brand.logoTop || "").trim() || String(brand.logoTop || "").trim() === "ApexLink"
+      ? "AvelixLink"
+      : String(brand.logoTop || "").trim();
+  const logoBottom =
+    !String(brand.logoBottom || "").trim() || String(brand.logoBottom || "").trim() === "Global"
+      ? ""
+      : String(brand.logoBottom || "").trim();
   const rawLogoImage = String(brand.logoImage || "").trim();
   const logoImage =
     !rawLogoImage ||

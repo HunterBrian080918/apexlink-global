@@ -442,7 +442,7 @@ const initCheckoutPage = async () => {
     return;
   }
 
-  document.title = `${currentProduct.name} Checkout | ${website?.brand?.name || "ApexLink Global"}`;
+  document.title = `${currentProduct.name} Checkout | ${website?.brand?.name || "AvelixLink"}`;
   currentPurchaseMode = resolvePurchaseMode(currentProduct, requestedMode);
   currentMinimumQuantity = currentPurchaseMode === "wholesale"
     ? Math.max(1, Number(currentProduct.b2b?.wholesaleMoq || 1))

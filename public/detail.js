@@ -505,7 +505,7 @@ const initPage = async () => {
   const id = params.get("id");
   currentProduct = id ? await store.getProductById(id) : (await store.getProducts())[0] || null;
 
-  renderDetail(currentProduct, website?.brand?.name || "ApexLink Global");
+  renderDetail(currentProduct, website?.brand?.name || "AvelixLink");
   setupRevealAnimations();
 };
 

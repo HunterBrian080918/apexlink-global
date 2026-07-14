@@ -95,6 +95,14 @@ const asText = (value, fallback = "") => {
   const normalized = String(value ?? "").trim();
   return normalized || fallback;
 };
+const normalizeBrandName = (value, fallback = "AvelixLink") => {
+  const normalized = String(value ?? "").trim();
+  return !normalized || normalized === "ApexLink Global" || normalized === "ApexLink" ? fallback : normalized;
+};
+const normalizeBrandBottom = (value, fallback = "") => {
+  const normalized = String(value ?? "").trim();
+  return !normalized || normalized === "Global" ? fallback : normalized;
+};
 const asNullableText = (value) => {
   const normalized = String(value ?? "").trim();
   return normalized || null;
@@ -142,14 +150,14 @@ const buildDefaultSiteConfig = () => {
   const social = asObject(website.social);
   const seo = asObject(website.seo);
   const settings = asObject(raw.settings);
-  const brandName = asText(brand.name, "ApexLink Global");
+  const brandName = normalizeBrandName(brand.name, "AvelixLink");
 
   return {
     website: {
       brand: {
         name: brandName,
-        logoTop: asText(brand.logoTop, "ApexLink"),
-        logoBottom: asText(brand.logoBottom, "Global"),
+        logoTop: normalizeBrandName(brand.logoTop, "AvelixLink"),
+        logoBottom: normalizeBrandBottom(brand.logoBottom, ""),
         logoImage: normalizeLogoImage(brand.logoImage, LOGO_FALLBACK_PATH),
         logoPublicId: asText(brand.logoPublicId),
         favicon: asText(brand.favicon, "assets/brand/apexlink-favicon.png"),
@@ -167,7 +175,7 @@ const buildDefaultSiteConfig = () => {
       },
       footer: {
         tagline: asText(footer.tagline, "Better Workspace.\nBetter Work."),
-        copyright: asText(footer.copyright, "© 2026 ApexLink. All rights reserved."),
+        copyright: asText(footer.copyright, "© 2026 AvelixLink. All rights reserved."),
       },
       contact: {
         email: asText(contact.email, "ApexLink080918@outlook.com"),
@@ -207,7 +215,7 @@ const buildDefaultSiteConfig = () => {
         homepage.spotlightSubtitle,
         "An all-in-one portable workspace organizer designed for modern professionals."
       ),
-      aboutTitle: asText(homepage.aboutTitle, "Why ApexLink"),
+      aboutTitle: asText(homepage.aboutTitle, "Why AvelixLink"),
       aboutText: asText(homepage.aboutText),
       aboutPoints: asStringArray(homepage.aboutPoints || []),
     },
@@ -246,9 +254,9 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
   return {
     website: {
       brand: {
-        name: asText(websiteRow?.brand_name, defaults.website.brand.name),
-        logoTop: asText(websiteRow?.brand_logo_top, defaults.website.brand.logoTop),
-        logoBottom: asText(websiteRow?.brand_logo_bottom, defaults.website.brand.logoBottom),
+        name: normalizeBrandName(websiteRow?.brand_name, defaults.website.brand.name),
+        logoTop: normalizeBrandName(websiteRow?.brand_logo_top, defaults.website.brand.logoTop),
+        logoBottom: normalizeBrandBottom(websiteRow?.brand_logo_bottom, defaults.website.brand.logoBottom),
         logoImage: normalizeLogoImage(websiteRow?.brand_logo_image, defaults.website.brand.logoImage),
         logoPublicId: asText(websiteRow?.brand_logo_public_id, defaults.website.brand.logoPublicId),
         favicon: asText(websiteRow?.favicon, defaults.website.brand.favicon),
@@ -420,7 +428,7 @@ const serializeWebsiteSettingsRow = (config, existingRow) => ({
 const serializeAppSettingsRow = (config, existingRow) => ({
   ...(existingRow || {}),
   id: 1,
-  platform_name: asNullableText(existingRow?.platform_name || config?.website?.brand?.name || "ApexLink Global"),
+  platform_name: asNullableText(existingRow?.platform_name || config?.website?.brand?.name || "AvelixLink"),
   platform_version:
     Number.isFinite(Number(existingRow?.platform_version)) && Number(existingRow.platform_version) > 0
       ? Number(existingRow.platform_version)

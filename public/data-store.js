@@ -19,7 +19,7 @@
 
   const createBrowserDefaultState = () => ({
     meta: {
-      platformName: "ApexLink Global",
+      platformName: "AvelixLink",
       version: 2,
     },
     analytics: {
@@ -38,28 +38,28 @@
     media: [],
     website: {
       brand: {
-        name: "ApexLink Global",
-        logoTop: "ApexLink",
-        logoBottom: "Global",
+        name: "AvelixLink",
+        logoTop: "AvelixLink",
+        logoBottom: "",
         logoImage: "/assets/brand/apexlink-mark.png",
         logoPublicId: "",
         favicon: "/assets/brand/apexlink-favicon.png",
         faviconPublicId: "",
-        browserTitle: "ApexLink Global",
+        browserTitle: "AvelixLink",
         subtitle: "",
       },
       hero: {
         eyebrow: "PREMIUM WORKSPACE SOLUTIONS",
         title: "Reimagine\nYour Workspace.",
         subtitle:
-          "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, ApexLink helps people build better workspaces.",
+          "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, AvelixLink helps people build better workspaces.",
         backgroundImage: "/assets/images/ny-hero.jpg",
         backgroundImagePublicId: "",
         banner: "",
       },
       footer: {
         tagline: "Better Workspace.\nBetter Work.",
-        copyright: "© 2026 ApexLink. All rights reserved.",
+        copyright: "© 2026 AvelixLink. All rights reserved.",
       },
       contact: {
         email: "ApexLink080918@outlook.com",
@@ -90,7 +90,7 @@
       eyebrow: "PREMIUM WORKSPACE SOLUTIONS",
       title: "Reimagine\nYour Workspace.",
       subtitle:
-        "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, ApexLink helps people build better workspaces.",
+        "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, AvelixLink helps people build better workspaces.",
       heroBackgroundImage: "/assets/images/ny-hero.jpg",
       heroCtaPrimaryLabel: "Explore Products",
       heroCtaPrimaryLink: "/products",
@@ -100,9 +100,9 @@
       featuredProductId: "",
       spotlightTitle: "Featured Product",
       spotlightSubtitle: "An all-in-one portable workspace organizer designed for modern professionals.",
-      aboutTitle: "Why ApexLink",
+      aboutTitle: "Why AvelixLink",
       aboutText:
-        "At ApexLink, we believe great ideas begin with a great workspace.\n\nWe create premium workspace products that combine thoughtful design, quality materials and practical functionality to help professionals work smarter every day.",
+        "At AvelixLink, we believe great ideas begin with a great workspace.\n\nWe create premium workspace products that combine thoughtful design, quality materials and practical functionality to help professionals work smarter every day.",
       aboutPoints: [
         "Thoughtful design for everyday work",
         "Quality materials with a premium finish",
@@ -769,17 +769,17 @@
 
     return {
       brand: {
-        name: String(brand.name || "ApexLink Global"),
-        logoTop: String(brand.logoTop || "ApexLink"),
-        logoBottom: String(brand.logoBottom || "Global"),
+        name: useUpdatedCopy(brand.name, "AvelixLink", ["ApexLink Global", "ApexLink"]),
+        logoTop: useUpdatedCopy(brand.logoTop, "AvelixLink", ["ApexLink"]),
+        logoBottom: useUpdatedCopy(brand.logoBottom, "", ["Global"]),
         logoImage: String(brand.logoImage || "assets/brand/apexlink-mark.png"),
         logoPublicId: String(brand.logoPublicId || ""),
         favicon: String(brand.favicon || "assets/brand/apexlink-favicon.png"),
         faviconPublicId: String(brand.faviconPublicId || ""),
         browserTitle: useUpdatedCopy(
           brand.browserTitle,
-          "ApexLink Global | Premium Workspace Solutions",
-          ["ApexLink Global | AI-Powered Global Sourcing Platform"]
+          "AvelixLink | Premium Workspace Solutions",
+          ["AvelixLink | AI-Powered Global Sourcing Platform"]
         ),
         subtitle: useUpdatedCopy(brand.subtitle, "Premium Workspace Solutions", ["AI-Powered Global Sourcing Platform"]),
       },
@@ -788,7 +788,7 @@
         title: useUpdatedCopy(hero.title, "Reimagine\nYour Workspace.", ["AI-Powered Global Sourcing Platform"]),
         subtitle: useUpdatedCopy(
           hero.subtitle,
-          "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, ApexLink helps people build better workspaces.",
+          "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, AvelixLink helps people build better workspaces.",
           ["Connect with trusted suppliers, compare products, and manage international trade with intelligent sourcing tools."]
         ),
         backgroundImage: String(hero.backgroundImage || "assets/images/ny-hero.jpg"),
@@ -803,10 +803,10 @@
         ),
         copyright: useUpdatedCopy(
           footer.copyright,
-          "© 2026 ApexLink. All rights reserved.",
+          "© 2026 AvelixLink. All rights reserved.",
           [
-            `© ${new Date().getFullYear()} ApexLink Global. All rights reserved.`,
-            "© 2026 ApexLink Global. All rights reserved.",
+            `© ${new Date().getFullYear()} AvelixLink. All rights reserved.`,
+            "© 2026 AvelixLink. All rights reserved.",
           ]
         ),
       },
@@ -932,14 +932,14 @@
           "An all-in-one portable workspace organizer designed for modern professionals.",
           ["Matched for price, MOQ and shipping speed"]
         ),
-        aboutTitle: useUpdatedCopy(homepage.aboutTitle, "Why ApexLink", [
+        aboutTitle: useUpdatedCopy(homepage.aboutTitle, "Why AvelixLink", [
           "A modern sourcing front end inspired by Shopify, Apple and leading SaaS products.",
         ]),
         aboutText: useUpdatedCopy(
           homepage.aboutText,
-          "At ApexLink, we believe great ideas begin with a great workspace.\n\nWe create premium workspace products that combine thoughtful design, quality materials and practical functionality to help professionals work smarter every day.",
+          "At AvelixLink, we believe great ideas begin with a great workspace.\n\nWe create premium workspace products that combine thoughtful design, quality materials and practical functionality to help professionals work smarter every day.",
           [
-            "ApexLink Global is a modern sourcing platform for premium product discovery. It combines an AI-style matching experience with a minimalist product catalog and detail pages suitable for international buyers, distributors, and sourcing teams.",
+            "AvelixLink is a modern sourcing platform for premium product discovery. It combines an AI-style matching experience with a minimalist product catalog and detail pages suitable for international buyers, distributors, and sourcing teams.",
           ]
         ),
         aboutPoints: asStringArray(

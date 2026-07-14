@@ -1,12 +1,12 @@
 {
   "meta": {
-    "platformName": "ApexLink Global",
+    "platformName": "AvelixLink",
     "version": 1
   },
   "homepage": {
     "eyebrow": "PREMIUM WORKSPACE SOLUTIONS",
     "title": "Reimagine\nYour Workspace.",
-    "subtitle": "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, ApexLink helps people build better workspaces.",
+    "subtitle": "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, AvelixLink helps people build better workspaces.",
     "heroBackgroundImage": "assets/images/ny-hero.jpg",
     "heroCtaPrimaryLabel": "Explore Products",
     "heroCtaPrimaryLink": "/products",
@@ -20,8 +20,8 @@
     "featuredProductId": "led-desk-lamp",
     "spotlightTitle": "Featured Product",
     "spotlightSubtitle": "An all-in-one portable workspace organizer designed for modern professionals.",
-    "aboutTitle": "Why ApexLink",
-    "aboutText": "At ApexLink, we believe great ideas begin with a great workspace.\n\nWe create premium workspace products that combine thoughtful design, quality materials and practical functionality to help professionals work smarter every day.",
+    "aboutTitle": "Why AvelixLink",
+    "aboutText": "At AvelixLink, we believe great ideas begin with a great workspace.\n\nWe create premium workspace products that combine thoughtful design, quality materials and practical functionality to help professionals work smarter every day.",
     "aboutPoints": [
       "Thoughtful design for everyday work",
       "Quality materials with a premium finish",
