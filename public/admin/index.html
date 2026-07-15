@@ -11,7 +11,7 @@
     rel="stylesheet"
   >
   <link rel="stylesheet" href="/admin/admin.css">
-  <link rel="icon" type="image/png" href="/assets/brand/avelixlink-favicon.png">
+  <link rel="icon" type="image/png" href="/assets/brand/apexlink-favicon.png">
 </head>
 <body class="admin-body">
   <div class="admin-login-shell" id="admin-login-shell">
@@ -44,7 +44,7 @@
     <aside class="admin-sidebar">
       <a class="admin-brand" href="/">
         <span class="admin-brand-mark">
-          <img src="/assets/brand/avelixlink-mark.png" alt="AvelixLink mark">
+          <img src="/assets/brand/apexlink-mark.png" alt="AvelixLink mark">
         </span>
         <span>
           <strong>AvelixLink</strong>
@@ -63,6 +63,21 @@
         </div>
 
         <div class="admin-topbar-actions">
+          <div class="admin-global-search">
+            <label class="admin-sr-only" for="admin-global-search-input">Search customers, orders, products and messages</label>
+            <input id="admin-global-search-input" type="search" placeholder="Search everything..." autocomplete="off">
+            <div class="admin-topbar-popover admin-search-results is-hidden" id="admin-search-results"></div>
+          </div>
+          <div class="admin-notification-center">
+            <button class="admin-icon-button" id="admin-notification-button" type="button" aria-label="Notifications" aria-expanded="false">
+              <span aria-hidden="true">&#128276;</span>
+              <span class="admin-notification-badge is-hidden" id="admin-notification-badge">0</span>
+            </button>
+            <div class="admin-topbar-popover admin-notification-popover is-hidden" id="admin-notification-popover">
+              <div class="admin-popover-header"><strong>Notifications</strong><button type="button" id="admin-mark-all-read">Mark all read</button></div>
+              <div id="admin-notification-list"></div>
+            </div>
+          </div>
           <button class="admin-ghost-button" id="admin-theme-toggle" type="button">Dark Mode</button>
           <button class="admin-ghost-button" id="admin-logout-button" type="button">Logout</button>
         </div>

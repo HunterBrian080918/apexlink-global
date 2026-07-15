@@ -376,8 +376,26 @@ textarea {
 
 .admin-topbar-actions {
   display: flex;
+  align-items: center;
   gap: 12px;
 }
+
+.admin-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.admin-global-search, .admin-notification-center { position: relative; }
+.admin-global-search input { width: min(30vw, 320px); min-height: 42px; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text); }
+.admin-icon-button { position: relative; width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font-size: 1.05rem; }
+.admin-icon-button:hover, .admin-icon-button[aria-expanded="true"] { background: var(--accent-soft); border-color: rgba(29,78,216,.25); }
+.admin-notification-badge { position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px; display: grid; place-items: center; border: 2px solid var(--surface); border-radius: 999px; background: #dc2626; color: #fff; font: 700 11px/1 var(--font-body); }
+.admin-topbar-popover { position: absolute; z-index: 80; top: calc(100% + 10px); right: 0; width: min(92vw, 390px); max-height: 520px; overflow: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: 0 22px 60px rgba(15,23,42,.18); }
+.admin-popover-header { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; padding: 15px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.admin-popover-header button { border: 0; background: none; color: var(--accent); font-weight: 700; }
+.admin-notification-item, .admin-search-result { width: 100%; display: grid; gap: 5px; padding: 13px 16px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--text); text-align: left; }
+.admin-notification-item:hover, .admin-search-result:hover { background: var(--accent-soft); }
+.admin-notification-item.is-unread { box-shadow: inset 3px 0 0 var(--accent); background: rgba(29,78,216,.045); }
+.admin-notification-item p, .admin-search-result p { margin: 0; color: var(--text-soft); line-height: 1.4; }
+.admin-notification-item time, .admin-search-result small { color: var(--text-soft); font-size: .76rem; }
+.admin-search-results { left: 0; right: auto; }
+.is-hidden { display: none !important; }
 
 .admin-content {
   padding: 28px 32px 40px;
@@ -799,6 +817,18 @@ textarea {
   grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   gap: 18px;
 }
+
+.admin-chat-layout { grid-template-columns: minmax(230px, 28%) minmax(360px, 1fr) minmax(250px, 300px); }
+.admin-customer-detail-grid { display: none; }
+.admin-customer-panel { height: clamp(620px, 74vh, 820px); overflow-y: auto; }
+.admin-customer-profile-head { display: flex; align-items: center; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.admin-customer-profile-head h3, .admin-customer-profile-head p { margin: 0; }
+.admin-customer-profile-head p { margin-top: 4px; color: var(--text-soft); }
+.admin-customer-avatar { width: 46px; height: 46px; flex: 0 0 46px; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 800; font-size: 1.1rem; }
+.admin-customer-profile-list { margin-top: 16px; }
+.admin-customer-profile-list div { grid-template-columns: 105px minmax(0,1fr); }
+.admin-customer-order-summary { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.admin-customer-order-summary .admin-linked-record-row { margin-top: 8px; }
 
 .admin-list-panel,
 .admin-thread-panel {
@@ -2178,10 +2208,14 @@ textarea {
   }
 
   .admin-thread-panel,
-  .admin-chat-panel {
+  .admin-chat-panel,
+  .admin-customer-panel {
     height: auto;
     min-height: 0;
   }
+
+  .admin-chat-layout { grid-template-columns: minmax(240px, 32%) minmax(0, 1fr); }
+  .admin-customer-panel { grid-column: 1 / -1; }
 
   .admin-payment-sticky-stack {
     position: static;
@@ -2235,6 +2269,9 @@ textarea {
     overflow: visible;
   }
 
+  .admin-chat-layout { grid-template-columns: 1fr; }
+  .admin-customer-panel { grid-column: auto; }
+
   .admin-content,
   .admin-topbar {
     padding-left: 20px;
@@ -2253,6 +2290,10 @@ textarea {
     flex-direction: column;
     align-items: stretch;
   }
+
+  .admin-topbar-actions { width: 100%; flex-wrap: wrap; }
+  .admin-global-search { flex: 1 1 260px; }
+  .admin-global-search input { width: 100%; }
 
   .admin-login-card {
     grid-template-columns: 1fr;

@@ -52,6 +52,9 @@ const adminState = {
     mode: "list",
     editingId: null,
     editorTab: "basic",
+    query: "",
+    status: "all",
+    selectedIds: [],
   },
   media: {
     query: "",
@@ -75,6 +78,7 @@ const SUPPORT_QUICK_REPLIES = [
   "Please confirm your target quantity and destination port.",
   "We can share pricing after MOQ and packaging are confirmed.",
 ];
+const CUSTOMER_STATUSES = ["new", "active", "waiting_customer", "waiting_admin", "vip", "wholesale", "retail", "resolved", "closed", "blocked"];
 const adminSupportRuntime = {
   conversations: [],
   selected: null,
@@ -102,6 +106,13 @@ const sectionLabel = document.querySelector("#admin-section-label");
 const sectionTitle = document.querySelector("#admin-section-title");
 const themeToggle = document.querySelector("#admin-theme-toggle");
 const logoutButton = document.querySelector("#admin-logout-button");
+const notificationButton = document.querySelector("#admin-notification-button");
+const notificationBadge = document.querySelector("#admin-notification-badge");
+const notificationPopover = document.querySelector("#admin-notification-popover");
+const notificationList = document.querySelector("#admin-notification-list");
+const markAllReadButton = document.querySelector("#admin-mark-all-read");
+const globalSearchInput = document.querySelector("#admin-global-search-input");
+const globalSearchResults = document.querySelector("#admin-search-results");
 const brandRoot = document.querySelector(".admin-brand");
 const brandImage = brandRoot?.querySelector("img");
 const brandStrong = brandRoot?.querySelector("strong");
@@ -150,6 +161,36 @@ const requestJson = async (url, options = {}) => {
   }
 
   return payload;
+};
+
+const notificationRuntime = { items: [], timer: null };
+
+const renderNotificationCenter = () => {
+  const unread = notificationRuntime.items.filter((item) => !item.isRead).length;
+  notificationBadge.textContent = unread > 99 ? "99+" : String(unread);
+  notificationBadge.classList.toggle("is-hidden", unread === 0);
+  notificationList.innerHTML = notificationRuntime.items.length
+    ? notificationRuntime.items.map((item) => `<button type="button" class="admin-notification-item ${item.isRead ? "" : "is-unread"}" data-notification-id="${escapeHtml(item.id)}" data-entity-type="${escapeHtml(item.entityType)}" data-entity-id="${escapeHtml(item.entityId)}"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p><time>${escapeHtml(formatDate(item.createdAt))}</time></button>`).join("")
+    : '<div class="admin-empty-state"><h4>All caught up</h4><p>No notifications yet.</p></div>';
+};
+
+const refreshNotifications = async () => {
+  try {
+    const payload = await requestJson("/api/admin/notifications");
+    notificationRuntime.items = Array.isArray(payload.notifications) ? payload.notifications : [];
+    renderNotificationCenter();
+  } catch (error) {
+    console.error("[admin] notifications failed", error);
+  }
+};
+
+const openAdminEntity = async (type, id) => {
+  if (type === "conversation") { adminState.activeSection = "customers"; adminState.customers.selectedId = id; }
+  else if (type === "order") { adminState.activeSection = "order"; adminState.orders.selectedId = id; }
+  else if (type === "payment") { adminState.activeSection = "payments"; adminState.payments.mode = "detail"; adminState.payments.selectedId = id; }
+  else if (type === "product") { adminState.activeSection = "products"; adminState.products.mode = "edit"; adminState.products.editingId = id; }
+  else return;
+  await renderCurrentSection();
 };
 
 const fetchAdminOrders = async () => {
@@ -706,6 +747,13 @@ const formatStatusLabel = (value) =>
     .replace(/[_-]+/g, " ")
     .trim()
     .replace(/\b\w/g, (part) => part.toUpperCase()) || "-";
+const formatProductStatusLabel = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "active") {
+    return "Published";
+  }
+  return formatStatusLabel(normalized);
+};
 const INTERNAL_ORDER_STATUSES = ["unprocessed", "processed"];
 const RETAIL_ORDER_STATUSES = ["pending_payment", "processing", "shipped", "delivered", "completed", "cancelled"];
 const WHOLESALE_ORDER_STATUSES = [
@@ -1673,8 +1721,13 @@ const buildOrderTrend = (orders) => {
 };
 
 const buildDashboardStats = async () => {
-  const [analyticsStats, orders] = await Promise.all([window.NorthstarStore.getDashboardStats(), fetchAdminOrders()]);
+  const [analyticsStats, orders, payments, conversations] = await Promise.all([
+    window.NorthstarStore.getDashboardStats(), fetchAdminOrders(), fetchAdminPayments(), fetchAdminSupportConversations({}),
+  ]);
   const todayKey = toDateKey();
+  const now = Date.now();
+  const paidPayments = payments.filter((payment) => ["paid", "payment-submitted"].includes(String(payment.status || "")));
+  const revenueSince = (days) => paidPayments.filter((payment) => now - new Date(payment.paidAt || payment.updatedAt || payment.createdAt).getTime() <= days * 86400000).reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
   const recentOrders = orders
     .slice()
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
@@ -1699,6 +1752,8 @@ const buildDashboardStats = async () => {
       visits: analyticsStats?.today?.visits || 0,
       aiMatch: analyticsStats?.today?.aiMatch || 0,
       orders: orders.filter((order) => toDateKey(order.createdAt) === todayKey).length,
+      inquiries: conversations.filter((item) => toDateKey(item.createdAt) === todayKey).length,
+      revenue: paidPayments.filter((payment) => toDateKey(payment.paidAt || payment.updatedAt || payment.createdAt) === todayKey).reduce((sum, payment) => sum + Number(payment.amount || 0), 0),
     },
     totals: {
       visits: analyticsStats?.totals?.visits || 0,
@@ -1709,12 +1764,18 @@ const buildDashboardStats = async () => {
       retailOrders: orders.filter((order) => String(order.purchaseMode || "") === "retail").length,
       wholesaleOrders: orders.filter((order) => String(order.purchaseMode || "") === "wholesale").length,
       products: analyticsStats?.totals?.products || 0,
+      unreadMessages: conversations.reduce((sum, item) => sum + Number(item.adminUnreadCount || 0), 0),
+      pendingPayments: payments.filter((payment) => !["paid", "refunded", "failed"].includes(String(payment.status || ""))).length,
+      weeklyRevenue: revenueSince(7),
+      monthlyRevenue: revenueSince(30),
     },
     trends: {
       visits: Array.isArray(analyticsStats?.trends?.visits) ? analyticsStats.trends.visits : [],
       orders: buildOrderTrend(orders),
     },
     recentOrders,
+    recentMessages: conversations.slice(0, 5),
+    recentCustomers: Array.from(new Map(conversations.filter((item) => item.customerId).map((item) => [item.customerId, item])).values()).slice(0, 5),
     environment: analyticsStats?.environment || {
       isDevelopment: false,
     },
@@ -1737,40 +1798,40 @@ const renderDashboardSection = async () => {
     <div class="admin-stack">
       <section class="admin-stat-grid">
         <article class="admin-stat-card">
-          <span>Today Visits</span>
+          <span>Today's Visitors</span>
           <strong>${formatNumber(stats.today.visits)}</strong>
         </article>
         <article class="admin-stat-card">
-          <span>Total Visits</span>
-          <strong>${formatNumber(stats.totals.visits)}</strong>
+          <span>Today's Inquiries</span>
+          <strong>${formatNumber(stats.today.inquiries)}</strong>
         </article>
         <article class="admin-stat-card">
-          <span>Today AI Match</span>
-          <strong>${formatNumber(stats.today.aiMatch)}</strong>
+          <span>Unread Messages</span>
+          <strong>${formatNumber(stats.totals.unreadMessages)}</strong>
         </article>
         <article class="admin-stat-card">
-          <span>Total AI Match</span>
-          <strong>${formatNumber(stats.totals.aiMatch)}</strong>
+          <span>Pending Payments</span>
+          <strong>${formatNumber(stats.totals.pendingPayments)}</strong>
         </article>
         <article class="admin-stat-card">
-          <span>Today Orders</span>
+          <span>Today's Orders</span>
           <strong>${formatNumber(stats.today.orders)}</strong>
         </article>
         <article class="admin-stat-card">
-          <span>Total Orders</span>
-          <strong>${formatNumber(stats.totals.orders)}</strong>
+          <span>Today's Revenue</span>
+          <strong>${escapeHtml(formatMoney(stats.today.revenue, "USD"))}</strong>
         </article>
         <article class="admin-stat-card">
-          <span>Pending Orders</span>
-          <strong>${formatNumber(stats.totals.pendingOrders)}</strong>
+          <span>Weekly Revenue</span>
+          <strong>${escapeHtml(formatMoney(stats.totals.weeklyRevenue, "USD"))}</strong>
         </article>
         <article class="admin-stat-card">
-          <span>Processing Orders</span>
-          <strong>${formatNumber(stats.totals.processingOrders)}</strong>
+          <span>Monthly Revenue</span>
+          <strong>${escapeHtml(formatMoney(stats.totals.monthlyRevenue, "USD"))}</strong>
         </article>
         <article class="admin-stat-card">
-          <span>Retail Orders</span>
-          <strong>${formatNumber(stats.totals.retailOrders)}</strong>
+          <span>System Status</span>
+          <strong class="admin-system-ok">Operational</strong>
         </article>
         <article class="admin-stat-card">
           <span>Wholesale Orders</span>
@@ -1845,6 +1906,16 @@ const renderDashboardSection = async () => {
             : renderEmptyState("No orders yet", "New website orders will appear here.")
         }
       </section>
+      <section class="admin-section-grid">
+        <article class="admin-panel">
+          <div class="admin-panel-header"><div><h3>Recent Messages</h3><p>Latest customer conversations.</p></div></div>
+          ${stats.recentMessages.length ? `<div class="admin-recent-list">${stats.recentMessages.map((item) => `<button class="admin-recent-item admin-dashboard-link" type="button" data-dashboard-conversation="${escapeHtml(item.id)}"><div><strong>${escapeHtml(item.customerName || item.email || "Customer")}</strong><p>${escapeHtml(item.lastMessageText || item.subject || "New conversation")}</p></div><small>${escapeHtml(formatDate(item.lastMessageAt || item.createdAt))}</small></button>`).join("")}</div>` : renderEmptyState("No messages", "New customer messages will appear here.")}
+        </article>
+        <article class="admin-panel">
+          <div class="admin-panel-header"><div><h3>Recent Customers</h3><p>Most recently active customers.</p></div></div>
+          ${stats.recentCustomers.length ? `<div class="admin-recent-list">${stats.recentCustomers.map((item) => `<button class="admin-recent-item admin-dashboard-link" type="button" data-dashboard-conversation="${escapeHtml(item.id)}"><div><strong>${escapeHtml(item.customerName || "Customer")}</strong><p>${escapeHtml(item.email || item.country || "No contact details")}</p></div><span class="admin-pill ${getStatusClass(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></button>`).join("")}</div>` : renderEmptyState("No customers", "New customers will appear here.")}
+        </article>
+      </section>
     </div>
   `;
 
@@ -1852,6 +1923,9 @@ const renderDashboardSection = async () => {
     await window.NorthstarStore.resetDevelopmentAnalytics();
     await renderDashboardSection();
   });
+  contentRoot.querySelectorAll("[data-dashboard-conversation]").forEach((button) => button.addEventListener("click", async () => {
+    await openAdminEntity("conversation", button.dataset.dashboardConversation);
+  }));
 };
 
 const renderOrdersSectionLegacy = async () => {
@@ -3802,6 +3876,7 @@ const renderCustomersSectionLocalLegacy = async () => {
 
 const renderCustomersSectionLegacy = async () => {
   let conversations = [];
+  const customerOrders = [];
 
   try {
     conversations = await fetchAdminSupportConversations({
@@ -4014,6 +4089,35 @@ const renderCustomersSectionLegacy = async () => {
               : renderEmptyState("No customer selected", "Choose a customer thread to open the chat window.")
           }
         </section>
+        <aside class="admin-panel admin-customer-panel">
+          ${
+            selected
+              ? `
+                <div class="admin-customer-profile-head">
+                  <span class="admin-customer-avatar">${escapeHtml((selected.customerName || selected.email || "C").slice(0, 1).toUpperCase())}</span>
+                  <div><h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3><p>${escapeHtml(formatStatusLabel(selected.status || "new"))}</p></div>
+                </div>
+                <dl class="admin-description-grid admin-customer-profile-list">
+                  <div><dt>Country</dt><dd>${escapeHtml(selected.country || "Not set")}</dd></div>
+                  <div><dt>Email</dt><dd class="admin-break-anywhere">${escapeHtml(selected.email || "Not set")}</dd></div>
+                  <div><dt>Phone</dt><dd>${escapeHtml(selected.customerPhone || selected.phone || "Not set")}</dd></div>
+                  <div><dt>WhatsApp</dt><dd>${escapeHtml(selected.whatsapp || "Not set")}</dd></div>
+                  <div><dt>Company</dt><dd>${escapeHtml(selected.company || "Not set")}</dd></div>
+                  <div><dt>Customer Type</dt><dd>${escapeHtml(formatStatusLabel(selected.customerType || selected.conversationType || "retail"))}</dd></div>
+                  <div><dt>Total Orders</dt><dd>${formatNumber(customerOrders.length)}</dd></div>
+                  <div><dt>Total Spend</dt><dd>${escapeHtml(formatMoney(customerOrders.reduce((sum, order) => sum + Number(order.subtotal || order.totalAmount || 0), 0), "USD"))}</dd></div>
+                  <div><dt>Current Status</dt><dd><span class="admin-pill ${getStatusClass(selected.status)}">${escapeHtml(formatStatusLabel(selected.status))}</span></dd></div>
+                  <div><dt>Tags</dt><dd>${escapeHtml(Array.isArray(selected.tags) && selected.tags.length ? selected.tags.join(", ") : "None")}</dd></div>
+                  <div><dt>Notes</dt><dd>${escapeHtml(selected.notes || "No notes")}</dd></div>
+                  <div><dt>Last Contact</dt><dd>${escapeHtml(formatDate(selected.lastMessageAt || selected.updatedAt))}</dd></div>
+                  <div><dt>VIP</dt><dd>${selected.isVip ? "Yes" : "No"}</dd></div>
+                  <div><dt>Blacklist</dt><dd>${selected.isBlacklisted ? "Blocked" : "No"}</dd></div>
+                </dl>
+                <div class="admin-customer-order-summary"><h4>Order History</h4>${customerOrders.length ? customerOrders.slice(0, 5).map((order) => `<button type="button" class="admin-linked-record-row" data-customer-order-id="${escapeHtml(order.id)}"><strong>${escapeHtml(order.orderNumber || order.orderId || order.id)}</strong><small>${escapeHtml(formatDate(order.createdAt))}</small></button>`).join("") : '<p class="admin-muted">No orders yet.</p>'}</div>
+              `
+              : renderEmptyState("Customer details", "Select a conversation to view customer information.")
+          }
+        </aside>
       </div>
     </div>
   `;
@@ -4326,6 +4430,33 @@ const setAdminReplyFormSendingState = (sending) => {
   }
 };
 
+const createCustomerPanelMarkup = (selected, customerOrders = []) => `
+  <aside class="admin-panel admin-customer-panel">
+    ${selected ? `
+      <div class="admin-customer-profile-head">
+        <span class="admin-customer-avatar">${escapeHtml((selected.customerName || selected.email || "C").slice(0, 1).toUpperCase())}</span>
+        <div><h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3><p>${escapeHtml(formatStatusLabel(selected.status || "new"))}</p></div>
+      </div>
+      <dl class="admin-description-grid admin-customer-profile-list">
+        <div><dt>Country</dt><dd>${escapeHtml(selected.country || "Not set")}</dd></div>
+        <div><dt>Email</dt><dd class="admin-break-anywhere">${escapeHtml(selected.email || "Not set")}</dd></div>
+        <div><dt>Phone</dt><dd>${escapeHtml(selected.customerPhone || selected.phone || "Not set")}</dd></div>
+        <div><dt>WhatsApp</dt><dd>${escapeHtml(selected.whatsapp || "Not set")}</dd></div>
+        <div><dt>Company</dt><dd>${escapeHtml(selected.company || "Not set")}</dd></div>
+        <div><dt>Customer Type</dt><dd>${escapeHtml(formatStatusLabel(selected.customerType || selected.conversationType || "retail"))}</dd></div>
+        <div><dt>Total Orders</dt><dd>${formatNumber(customerOrders.length)}</dd></div>
+        <div><dt>Total Spend</dt><dd>${escapeHtml(formatMoney(customerOrders.reduce((sum, order) => sum + Number(order.subtotal || order.totalAmount || 0), 0), "USD"))}</dd></div>
+        <div><dt>Current Status</dt><dd><select class="admin-compact-select" id="customer-profile-status">${CUSTOMER_STATUSES.map((status) => `<option value="${status}" ${(selected.customerStatus || "new") === status ? "selected" : ""}>${escapeHtml(formatStatusLabel(status))}</option>`).join("")}</select></dd></div>
+        <div><dt>Tags</dt><dd>${escapeHtml(Array.isArray(selected.tags) && selected.tags.length ? selected.tags.join(", ") : "None")}</dd></div>
+        <div><dt>Notes</dt><dd>${escapeHtml(selected.notes || "No notes")}</dd></div>
+        <div><dt>Last Contact</dt><dd>${escapeHtml(formatDate(selected.lastMessageAt || selected.updatedAt))}</dd></div>
+        <div><dt>VIP</dt><dd>${selected.isVip ? "Yes" : "No"}</dd></div>
+        <div><dt>Blacklist</dt><dd>${selected.isBlacklisted ? "Blocked" : "No"}</dd></div>
+      </dl>
+      <div class="admin-customer-order-summary"><h4>Order History</h4>${customerOrders.length ? customerOrders.slice(0, 5).map((order) => `<button type="button" class="admin-linked-record-row" data-customer-order-id="${escapeHtml(order.id)}"><strong>${escapeHtml(order.orderNumber || order.orderId || order.id)}</strong><small>${escapeHtml(formatDate(order.createdAt))}</small></button>`).join("") : '<p class="admin-muted">No orders yet.</p>'}</div>
+    ` : renderEmptyState("Customer details", "Select a conversation to view customer information.")}
+  </aside>`;
+
 const renderCustomersSectionView = (options = {}) => {
   const preservedDraft = options.clearDraft ? "" : getAdminSupportComposerDraft();
   const conversations = adminSupportRuntime.conversations;
@@ -4524,6 +4655,7 @@ const renderCustomersSectionView = (options = {}) => {
               : renderEmptyState("No customer selected", "Choose a customer thread to open the chat window.")
           }
         </section>
+        ${createCustomerPanelMarkup(selected, customerOrders)}
       </div>
     </div>
   `;
@@ -4568,6 +4700,12 @@ const renderCustomersSectionView = (options = {}) => {
     button.addEventListener("click", async () => {
       await openAdminOrderDetail(button.dataset.customerOrderId || null);
     });
+  });
+
+  document.querySelector("#customer-profile-status")?.addEventListener("change", async (event) => {
+    if (!selected?.customerId) return;
+    await requestJson(`/api/admin/customers/${encodeURIComponent(selected.customerId)}`, { method: "PATCH", body: JSON.stringify({ customerStatus: event.target.value }) });
+    selected.customerStatus = event.target.value;
   });
 
   contentRoot.querySelectorAll("[data-quick-reply]").forEach((button) => {
@@ -4829,6 +4967,7 @@ const renderProductTable = (products) => `
     <table class="admin-table">
       <thead>
         <tr>
+          <th><input type="checkbox" id="admin-product-select-all" ${products.length && products.every((product) => adminState.products.selectedIds.includes(product.id)) ? "checked" : ""}></th>
           <th>Image</th>
           <th>Name</th>
           <th>Category</th>
@@ -4845,6 +4984,7 @@ const renderProductTable = (products) => `
           .map(
             (product) => `
               <tr>
+                <td><input type="checkbox" data-product-select="${escapeHtml(product.id)}" ${adminState.products.selectedIds.includes(product.id) ? "checked" : ""}></td>
                 <td><img class="admin-image-thumb" src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}"></td>
                 <td>${escapeHtml(product.name)}</td>
                 <td>${escapeHtml(product.category)}</td>
@@ -4852,10 +4992,12 @@ const renderProductTable = (products) => `
                 <td>${escapeHtml(product.moq)}</td>
                 <td>${escapeHtml(product.shippingTime)}</td>
                 <td>${escapeHtml(product.stock)}</td>
-                <td><span class="admin-pill ${getStatusClass(product.status)}">${escapeHtml(product.status)}</span></td>
+                <td><span class="admin-pill ${getStatusClass(product.status)}">${escapeHtml(formatProductStatusLabel(product.status))}</span></td>
                 <td>
                   <div class="admin-actions-inline">
-                    <button class="admin-secondary-button" type="button" data-product-edit="${escapeHtml(product.id)}">Edit</button>
+                    <button class="admin-secondary-button" type="button" data-product-edit="${escapeHtml(product.id)}">Quick Edit</button>
+                    <button class="admin-secondary-button" type="button" data-product-preview="${escapeHtml(product.id)}">Preview</button>
+                    <button class="admin-secondary-button" type="button" data-product-duplicate="${escapeHtml(product.id)}">Duplicate</button>
                     <button class="admin-danger-button" type="button" data-product-delete="${escapeHtml(product.id)}">Delete</button>
                   </div>
                 </td>
@@ -4870,6 +5012,14 @@ const renderProductTable = (products) => `
 
 const renderProductListSection = async () => {
   const products = await window.NorthstarStore.getProducts();
+  const query = adminState.products.query.trim().toLowerCase();
+  const filteredProducts = products.filter((product) => {
+    if (adminState.products.status !== "all" && String(product.status || "").toLowerCase() !== adminState.products.status) {
+      return false;
+    }
+
+    return !query || [product.id, product.name, product.category, product.status].join(" ").toLowerCase().includes(query);
+  });
 
   contentRoot.innerHTML = `
     <div class="admin-stack">
@@ -4881,9 +5031,34 @@ const renderProductListSection = async () => {
           </div>
           <button class="admin-primary-button" type="button" id="add-product-button">Add Product</button>
         </div>
+        <div class="admin-library-toolbar">
+          <label class="admin-search-field">Search<input id="admin-product-search" type="search" value="${escapeHtml(adminState.products.query)}" placeholder="Name, category, status"></label>
+          <label>
+            Status
+            <select id="admin-product-status-filter">
+              <option value="all" ${adminState.products.status === "all" ? "selected" : ""}>All</option>
+              <option value="active" ${adminState.products.status === "active" ? "selected" : ""}>Published</option>
+              <option value="draft" ${adminState.products.status === "draft" ? "selected" : ""}>Draft</option>
+              <option value="hidden" ${adminState.products.status === "hidden" ? "selected" : ""}>Hidden</option>
+              <option value="archived" ${adminState.products.status === "archived" ? "selected" : ""}>Archived</option>
+            </select>
+          </label>
+          <label>
+            Bulk Action
+            <select id="admin-product-bulk-action">
+              <option value="">Select action</option>
+              <option value="publish">Publish</option>
+              <option value="draft">Move to Draft</option>
+              <option value="hidden">Hide</option>
+              <option value="archived">Archive</option>
+              <option value="delete">Delete</option>
+            </select>
+          </label>
+          <button class="admin-secondary-button" type="button" id="admin-product-bulk-apply" ${adminState.products.selectedIds.length ? "" : "disabled"}>Apply</button>
+        </div>
         ${
-          products.length
-            ? renderProductTable(products)
+          filteredProducts.length
+            ? renderProductTable(filteredProducts)
             : renderEmptyState("No products yet", "Use Add Product to create the first catalog item.")
         }
       </section>
@@ -4894,6 +5069,67 @@ const renderProductListSection = async () => {
     adminState.products.mode = "edit";
     adminState.products.editingId = null;
     await renderCurrentSection();
+  });
+
+  document.querySelector("#admin-product-search")?.addEventListener("input", async (event) => {
+    adminState.products.query = event.target.value || "";
+    await renderProductListSection();
+  });
+
+  document.querySelector("#admin-product-status-filter")?.addEventListener("change", async (event) => {
+    adminState.products.status = event.target.value || "all";
+    await renderProductListSection();
+  });
+
+  document.querySelector("#admin-product-select-all")?.addEventListener("change", (event) => {
+    adminState.products.selectedIds = event.target.checked ? filteredProducts.map((product) => product.id) : [];
+    renderProductListSection();
+  });
+
+  contentRoot.querySelectorAll("[data-product-select]").forEach((checkbox) => {
+    checkbox.addEventListener("change", async (event) => {
+      const productId = event.target.dataset.productSelect;
+      const selectedIds = new Set(adminState.products.selectedIds);
+      if (event.target.checked) selectedIds.add(productId);
+      else selectedIds.delete(productId);
+      adminState.products.selectedIds = Array.from(selectedIds);
+      await renderProductListSection();
+    });
+  });
+
+  contentRoot.querySelectorAll("[data-product-preview]").forEach((button) => button.addEventListener("click", () => {
+    window.open(`/detail?id=${encodeURIComponent(button.dataset.productPreview)}`, "_blank", "noopener");
+  }));
+
+  contentRoot.querySelectorAll("[data-product-duplicate]").forEach((button) => button.addEventListener("click", async () => {
+    const source = await window.NorthstarStore.getProductById(button.dataset.productDuplicate);
+    if (!source) return;
+    const suffix = Date.now().toString(36);
+    await window.NorthstarStore.upsertProduct({ ...source, id: `${source.id}-copy-${suffix}`, slug: `${source.slug || source.id}-copy-${suffix}`, name: `${source.name} Copy`, status: "draft", createdAt: undefined });
+    adminState.products.selectedIds = [];
+    await renderProductListSection();
+  }));
+
+  document.querySelector("#admin-product-bulk-apply")?.addEventListener("click", async () => {
+    const action = document.querySelector("#admin-product-bulk-action")?.value || "";
+    const selectedIds = [...adminState.products.selectedIds];
+    if (!action || !selectedIds.length) return;
+
+    if (action === "delete") {
+      if (!window.confirm(`Delete ${selectedIds.length} selected product(s)?`)) return;
+      for (const productId of selectedIds) {
+        await window.NorthstarStore.deleteProduct(productId);
+      }
+    } else {
+      for (const productId of selectedIds) {
+        const source = await window.NorthstarStore.getProductById(productId);
+        if (!source) continue;
+        await window.NorthstarStore.upsertProduct({ ...source, status: action === "publish" ? "active" : action });
+      }
+    }
+
+    adminState.products.selectedIds = [];
+    await renderProductListSection();
   });
 
   contentRoot.querySelectorAll("[data-product-edit]").forEach((button) => {
@@ -5057,9 +5293,10 @@ const renderProductEditorSection = async () => {
               <label>
                 Status
                 <select name="status">
-                  <option value="active" ${product.status === "active" ? "selected" : ""}>active</option>
-                  <option value="draft" ${product.status === "draft" ? "selected" : ""}>draft</option>
-                  <option value="archived" ${product.status === "archived" ? "selected" : ""}>archived</option>
+                  <option value="active" ${product.status === "active" ? "selected" : ""}>Published</option>
+                  <option value="draft" ${product.status === "draft" ? "selected" : ""}>Draft</option>
+                  <option value="hidden" ${product.status === "hidden" ? "selected" : ""}>Hidden</option>
+                  <option value="archived" ${product.status === "archived" ? "selected" : ""}>Archived</option>
                 </select>
               </label>
             </div>
@@ -6896,6 +7133,8 @@ const boot = async () => {
 
   if (session?.email) {
     showShell();
+    await refreshNotifications();
+    notificationRuntime.timer = window.setInterval(refreshNotifications, 15000);
     await renderCurrentSection();
   } else {
     showLogin();
@@ -6985,6 +7224,65 @@ navRoot?.addEventListener("click", async (event) => {
 themeToggle?.addEventListener("click", () => {
   adminState.theme = adminState.theme === "dark" ? "light" : "dark";
   applyTheme();
+});
+
+notificationButton?.addEventListener("click", (event) => {
+  event.stopPropagation();
+  const opening = notificationPopover.classList.contains("is-hidden");
+  notificationPopover.classList.toggle("is-hidden", !opening);
+  notificationButton.setAttribute("aria-expanded", String(opening));
+  globalSearchResults?.classList.add("is-hidden");
+});
+
+notificationList?.addEventListener("click", async (event) => {
+  const item = event.target.closest("[data-notification-id]");
+  if (!item) return;
+  await requestJson(`/api/admin/notifications/${encodeURIComponent(item.dataset.notificationId)}/read`, { method: "POST" });
+  const current = notificationRuntime.items.find((entry) => entry.id === item.dataset.notificationId);
+  if (current) current.isRead = true;
+  renderNotificationCenter();
+  notificationPopover.classList.add("is-hidden");
+  notificationButton.setAttribute("aria-expanded", "false");
+  await openAdminEntity(item.dataset.entityType, item.dataset.entityId);
+});
+
+markAllReadButton?.addEventListener("click", async () => {
+  await requestJson("/api/admin/notifications/read-all", { method: "POST" });
+  notificationRuntime.items.forEach((item) => { item.isRead = true; });
+  renderNotificationCenter();
+});
+
+let globalSearchTimer = null;
+globalSearchInput?.addEventListener("input", () => {
+  window.clearTimeout(globalSearchTimer);
+  const query = globalSearchInput.value.trim();
+  if (query.length < 2) { globalSearchResults.classList.add("is-hidden"); return; }
+  globalSearchTimer = window.setTimeout(async () => {
+    try {
+      const payload = await requestJson(`/api/admin/search?q=${encodeURIComponent(query)}`);
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      globalSearchResults.innerHTML = results.length
+        ? results.map((item) => `<button type="button" class="admin-search-result" data-search-type="${escapeHtml(item.type)}" data-search-id="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.subtitle)}</p><small>${escapeHtml(formatStatusLabel(item.type))}</small></button>`).join("")
+        : '<div class="admin-empty-state"><h4>No results</h4><p>Try another customer, order number, product or email.</p></div>';
+      globalSearchResults.classList.remove("is-hidden");
+    } catch (error) { console.error("[admin] global search failed", error); }
+  }, 220);
+});
+
+globalSearchResults?.addEventListener("click", async (event) => {
+  const result = event.target.closest("[data-search-type]");
+  if (!result) return;
+  globalSearchResults.classList.add("is-hidden");
+  globalSearchInput.value = "";
+  await openAdminEntity(result.dataset.searchType, result.dataset.searchId);
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".admin-notification-center")) {
+    notificationPopover?.classList.add("is-hidden");
+    notificationButton?.setAttribute("aria-expanded", "false");
+  }
+  if (!event.target.closest(".admin-global-search")) globalSearchResults?.classList.add("is-hidden");
 });
 
 logoutButton?.addEventListener("click", async () => {

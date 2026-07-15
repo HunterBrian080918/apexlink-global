@@ -44,6 +44,7 @@ const {
   updateConversationStatus: updateSupabaseSupportConversationStatus,
   markAdminRead: markSupabaseSupportConversationRead,
   markCustomerRead: markSupabaseSupportConversationReadByCustomer,
+  updateCustomerProfile: updateSupabaseCustomerProfile,
 } = require("./services/supabase-support");
 const {
   ALLOWED_SECTIONS: CMS_ALLOWED_SECTIONS,
@@ -71,6 +72,20 @@ const {
   updateAdminAuthAccount: updateSupabaseAdminAuthAccount,
   touchAdminLastLogin: touchSupabaseAdminLastLogin,
 } = require("./services/supabase-admin-auth");
+const {
+  listNotifications,
+  createNotification,
+  markNotificationRead,
+  markAllNotificationsRead,
+  getUnreadNotificationCount,
+} = require("./services/supabase-notifications");
+const {
+  sendAdminSubmissionEmail,
+  verifyEmailTransport,
+  logEmailConfigurationWarning,
+  getEmailConfigurationStatus,
+} = require("./services/email-notifications");
+const { createContactInquiry, validateContactPayload } = require("./services/supabase-contact");
 
 const root = __dirname;
 const publicRoot = path.join(root, "public");
@@ -87,6 +102,34 @@ const redirectMap = {
   "/ai-match": "/workspace-finder",
   "/ai-match.html": "/workspace-finder",
 };
+
+const runBackgroundTask = (label, task) => {
+  Promise.resolve().then(task).catch((error) => console.error(`[${label}] ${error?.message || error}`));
+};
+
+const notifyAdmin = (input) => runBackgroundTask("notifications", () => createNotification(input));
+const emailAdmin = (kind, input) => runBackgroundTask("email", () => sendAdminSubmissionEmail(kind, input));
+const getAdminBaseUrl = () => String(process.env.ADMIN_URL || `http://127.0.0.1:${port}/admin`).trim();
+const buildAdminDeepLink = (section, entityId) => {
+  const base = getAdminBaseUrl().replace(/\/+$/, "");
+  if (!section) {
+    return base;
+  }
+  if (!entityId) {
+    return `${base}?section=${encodeURIComponent(section)}`;
+  }
+  return `${base}?section=${encodeURIComponent(section)}&id=${encodeURIComponent(entityId)}`;
+};
+const buildNotificationMetadata = (input = {}) => ({
+  customerName: String(input.customerName || "").trim() || null,
+  email: String(input.email || "").trim() || null,
+  timestamp: String(input.timestamp || nowIso()).trim(),
+  adminLink: String(input.adminLink || "").trim() || null,
+  orderNumber: String(input.orderNumber || "").trim() || null,
+  relatedProductName: String(input.relatedProductName || "").trim() || null,
+  purchaseMode: String(input.purchaseMode || "").trim() || null,
+  ...((input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)) ? input.metadata : {}),
+});
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -197,10 +240,52 @@ const readDefaultData = () => {
   const raw = fs.readFileSync(defaultDataFile, "utf8");
   return JSON.parse(raw);
 };
+const parseOrigin = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  try {
+    return new URL(normalized).origin;
+  } catch (error) {
+    return "";
+  }
+};
+const buildContentSecurityPolicy = () => {
+  const connectSrc = new Set(["'self'"]);
+  const imgSrc = new Set(["'self'", "data:", "blob:"]);
+  const styleSrc = new Set(["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]);
+  const fontSrc = new Set(["'self'", "data:", "https://fonts.gstatic.com"]);
+  const frameAncestors = new Set(["'self'"]);
+  const formAction = new Set(["'self'", "mailto:", "https://wa.me", "https://api.whatsapp.com"]);
+
+  const supabaseOrigin = parseOrigin(process.env.SUPABASE_URL);
+  const renderOrigin = parseOrigin(process.env.RENDER_EXTERNAL_URL);
+  const adminOrigin = parseOrigin(process.env.ADMIN_URL);
+
+  [supabaseOrigin, renderOrigin, adminOrigin].filter(Boolean).forEach((origin) => connectSrc.add(origin));
+  imgSrc.add("https://res.cloudinary.com");
+
+  return [
+    "default-src 'self'",
+    `script-src 'self'`,
+    `style-src ${Array.from(styleSrc).join(" ")}`,
+    `img-src ${Array.from(imgSrc).join(" ")}`,
+    `font-src ${Array.from(fontSrc).join(" ")}`,
+    `connect-src ${Array.from(connectSrc).join(" ")}`,
+    `form-action ${Array.from(formAction).join(" ")}`,
+    `navigate-to ${Array.from(formAction).join(" ")}`,
+    "base-uri 'self'",
+    `frame-ancestors ${Array.from(frameAncestors).join(" ")}`,
+    "object-src 'none'",
+  ].join("; ");
+};
 const getSecurityHeaders = (headers = {}) => ({
   "X-Content-Type-Options": "nosniff",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "X-Frame-Options": "SAMEORIGIN",
+  "Content-Security-Policy": buildContentSecurityPolicy(),
   ...headers,
 });
 
@@ -1199,6 +1284,34 @@ const handleOrderCreate = async (request, response) => {
     const orderInput = body?.order && typeof body.order === "object" ? body.order : body;
     const order = await createSupabaseOrder(orderInput);
 
+    const isWholesale = String(order?.purchaseMode || orderInput?.purchaseMode || "").toLowerCase() === "wholesale";
+    const adminLink = buildAdminDeepLink("order", order?.id);
+    notifyAdmin({
+      type: isWholesale ? "new_wholesale_inquiry" : "new_retail_order",
+      title: isWholesale ? "New wholesale inquiry" : "New retail order",
+      message: `Order ${order?.orderNumber || order?.orderId || order?.id || "created"} created`,
+      entityType: "order",
+      entityId: order?.id,
+      metadata: buildNotificationMetadata({
+        customerName: order?.customerName || orderInput?.customerName,
+        email: order?.email || orderInput?.email,
+        timestamp: order?.createdAt || nowIso(),
+        adminLink,
+        orderNumber: order?.orderNumber || order?.orderId || "",
+        relatedProductName: order?.productName || orderInput?.productName,
+        purchaseMode: order?.purchaseMode || orderInput?.purchaseMode,
+      }),
+    });
+    emailAdmin(isWholesale ? "wholesale" : "retail", {
+      customerName: order?.customerName || orderInput?.customerName,
+      email: order?.email || orderInput?.email,
+      country: order?.country || orderInput?.country,
+      product: order?.productName || orderInput?.productName,
+      message: order?.message || orderInput?.message,
+      time: order?.createdAt || nowIso(),
+      adminUrl: adminLink,
+    });
+
     sendJson(response, 201, {
       ok: true,
       order,
@@ -1315,6 +1428,28 @@ const handleOrderPaymentCreate = async (request, response, orderId) => {
     const body = await readJsonBody(request);
     const paymentInput = body?.payment && typeof body.payment === "object" ? body.payment : body;
     const payload = await createSupabasePaymentForOrder(orderId, paymentInput);
+    const adminLink = buildAdminDeepLink("order", payload.order?.id || orderId);
+    notifyAdmin({
+      type: "new_payment",
+      title: "New payment received",
+      message: `${payload.payment?.currency || "USD"} ${payload.payment?.amount || 0} for ${payload.order?.orderNumber || payload.order?.orderId || orderId}`,
+      entityType: "payment",
+      entityId: payload.payment?.id,
+      metadata: buildNotificationMetadata({
+        customerName: payload.order?.customerName,
+        email: payload.order?.email,
+        timestamp: payload.payment?.createdAt || nowIso(),
+        adminLink,
+        orderNumber: payload.order?.orderNumber || payload.order?.orderId || "",
+        purchaseMode: payload.order?.purchaseMode,
+        metadata: {
+          orderId,
+          amount: payload.payment?.amount || 0,
+          currency: payload.payment?.currency || "USD",
+          paymentMethod: payload.payment?.paymentMethod || "",
+        },
+      }),
+    });
     sendJson(response, 201, {
       ok: true,
       payment: payload.payment,
@@ -1535,6 +1670,40 @@ const handleSupportConversationCreate = async (request, response) => {
     const body = await readJsonBody(request);
     const input = body?.conversation && typeof body.conversation === "object" ? body.conversation : body;
     const result = await createSupabaseSupportConversation(input);
+    const source = String(input?.source || result.conversation?.source || "support").toLowerCase();
+    const conversationType = String(input?.conversationType || result.conversation?.conversationType || "general_contact").toLowerCase();
+    const isContact = source === "contact";
+    const isQuote = conversationType === "product_inquiry" || conversationType === "wholesale_inquiry";
+    const notificationType = isContact ? "new_contact_inquiry" : isQuote ? "new_quote_request" : "new_support_message";
+    const adminLink = buildAdminDeepLink("customers", result.conversation?.id);
+    notifyAdmin({
+      type: notificationType,
+      title: isContact ? "New contact inquiry" : isQuote ? "New quote request" : "New support message",
+      message: `${result.conversation?.customerName || input?.customerName || "A customer"} sent a new inquiry`,
+      entityType: "conversation",
+      entityId: result.conversation?.id,
+      metadata: buildNotificationMetadata({
+        customerName: result.conversation?.customerName || input?.customerName,
+        email: result.conversation?.email || input?.email,
+        timestamp: result.message?.createdAt || nowIso(),
+        adminLink,
+        relatedProductName: result.conversation?.relatedProductName || input?.productName,
+        metadata: {
+          source,
+          conversationType,
+          subject: result.conversation?.subject || input?.subject || "",
+        },
+      }),
+    });
+    emailAdmin(isContact ? "contact" : isQuote ? "quote" : "support", {
+      customerName: result.conversation?.customerName || input?.customerName,
+      email: result.conversation?.email || input?.email,
+      country: result.conversation?.country || input?.customerCountry || input?.country,
+      product: result.conversation?.relatedProductName || input?.productName || input?.product,
+      message: result.message?.text || input?.message || input?.text,
+      time: result.message?.createdAt || nowIso(),
+      adminUrl: adminLink,
+    });
     console.info(`[support][request][POST /api/support/conversations] total_ms=${Date.now() - startedAt}`);
     broadcastSupportConversation(result.conversation);
     broadcastSupportMessage(result.conversation, result.message);
@@ -1553,12 +1722,97 @@ const handleSupportConversationCreate = async (request, response) => {
   return true;
 };
 
+const handleContactCreate = async (request, response) => {
+  try {
+    const body = await readJsonBody(request);
+    const input = body?.contact && typeof body.contact === "object" ? body.contact : body;
+    const payload = validateContactPayload(input);
+    const result = await createContactInquiry(payload);
+    const adminLink = buildAdminDeepLink("customers", result.conversation?.id);
+
+    notifyAdmin({
+      type: "new_contact_inquiry",
+      title: "New contact inquiry",
+      message: `${payload.name} submitted a new contact inquiry.`,
+      entityType: "conversation",
+      entityId: result.conversation?.id,
+      metadata: buildNotificationMetadata({
+        customerName: payload.name,
+        email: payload.email,
+        timestamp: result.contactMessage?.created_at || nowIso(),
+        adminLink,
+        metadata: {
+          source: "contact",
+          subject: payload.subject,
+          contactMessageId: result.contactMessage?.id || null,
+        },
+      }),
+    });
+
+    emailAdmin("contact", {
+      customerName: payload.name,
+      email: payload.email,
+      country: payload.country,
+      product: payload.subject,
+      message: payload.company ? `Company: ${payload.company}\n\n${payload.message}` : payload.message,
+      time: result.contactMessage?.created_at || nowIso(),
+      adminUrl: adminLink,
+    });
+
+    broadcastSupportConversation(result.conversation);
+    broadcastSupportMessage(result.conversation, result.firstMessage);
+
+    sendJson(response, 201, {
+      ok: true,
+      inquiry: {
+        id: result.contactMessage?.id || "",
+        status: result.contactMessage?.status || "unprocessed",
+      },
+      conversation: result.conversation,
+    });
+  } catch (error) {
+    console.error("[contact] create failed:", error);
+    sendJson(response, error?.status || 400, {
+      error: error?.message || "Unable to submit contact inquiry.",
+    });
+  }
+
+  return true;
+};
+
 const handleSupportCustomerMessageCreate = async (request, response, conversationId) => {
   const startedAt = Date.now();
   try {
     const body = await readJsonBody(request);
     const messageInput = body?.message && typeof body.message === "object" ? body.message : body;
     const result = await addSupabaseCustomerSupportMessage(conversationId, messageInput);
+    const adminLink = buildAdminDeepLink("customers", result.conversation?.id || conversationId);
+    notifyAdmin({
+      type: "customer_reply",
+      title: "Customer replied to conversation",
+      message: `${result.conversation?.customerName || "A customer"} sent a new support message`,
+      entityType: "conversation",
+      entityId: result.conversation?.id || conversationId,
+      metadata: buildNotificationMetadata({
+        customerName: result.conversation?.customerName,
+        email: result.conversation?.email,
+        timestamp: result.message?.createdAt || nowIso(),
+        adminLink,
+        relatedProductName: result.conversation?.relatedProductName,
+        metadata: {
+          conversationType: result.conversation?.conversationType || "",
+        },
+      }),
+    });
+    emailAdmin("support", {
+      customerName: result.conversation?.customerName,
+      email: result.conversation?.email,
+      country: result.conversation?.country,
+      product: result.conversation?.relatedProductName,
+      message: result.message?.text || messageInput?.text,
+      time: result.message?.createdAt || nowIso(),
+      adminUrl: adminLink,
+    });
     console.info(
       `[support][request][POST /api/support/conversations/:id/messages] total_ms=${Date.now() - startedAt} conversation_id=${conversationId}`
     );
@@ -1815,7 +2069,102 @@ const handleAdminSupportConversationRead = async (request, response, conversatio
   return true;
 };
 
+const handleAdminCustomerUpdate = async (request, response, customerId) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) return true;
+  try {
+    const body = await readJsonBody(request);
+    const customer = await updateSupabaseCustomerProfile(customerId, body?.customer || body);
+    sendJson(response, 200, { ok: true, customer });
+  } catch (error) {
+    sendJson(response, error?.status || 400, { error: error?.message || "Unable to update customer." });
+  }
+  return true;
+};
+
+const sendAdminNotifications = async (request, response) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) return true;
+  try {
+    const [notifications, unreadCount] = await Promise.all([listNotifications(60), getUnreadNotificationCount()]);
+    sendJson(response, 200, { notifications, unreadCount });
+  } catch (error) {
+    sendJson(response, 500, { error: error?.message || "Unable to load notifications." });
+  }
+  return true;
+};
+
+const handleAdminNotificationRead = async (request, response, notificationId) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) return true;
+  try {
+    const notification = await markNotificationRead(notificationId);
+    sendJson(response, 200, { ok: true, notification });
+  } catch (error) {
+    sendJson(response, 400, { error: error?.message || "Unable to mark notification read." });
+  }
+  return true;
+};
+
+const handleAdminNotificationsReadAll = async (request, response) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) return true;
+  await markAllNotificationsRead();
+  sendJson(response, 200, { ok: true });
+  return true;
+};
+
+const sendAdminGlobalSearch = async (request, response, requestUrl) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) return true;
+  const query = String(requestUrl.searchParams.get("q") || "").trim().toLowerCase();
+  if (query.length < 2) {
+    sendJson(response, 200, { results: [] });
+    return true;
+  }
+  const settled = await Promise.allSettled([
+    listSupabaseOrders(), listSupabaseProducts(), listSupabasePayments(), listSupabaseAdminSupportConversations({ query }),
+  ]);
+  const values = settled.map((item) => item.status === "fulfilled" && Array.isArray(item.value) ? item.value : []);
+  const includesQuery = (item) => JSON.stringify(item || {}).toLowerCase().includes(query);
+  const results = [
+    ...values[0].filter(includesQuery).slice(0, 8).map((item) => ({ type: "order", id: item.id, title: item.orderNumber || item.orderId || item.id, subtitle: `${item.customerName || "Customer"} · ${item.email || ""}`, section: "orders" })),
+    ...values[1].filter(includesQuery).slice(0, 8).map((item) => ({ type: "product", id: item.id, title: item.name || item.id, subtitle: item.category || "Product", section: "products" })),
+    ...values[2].filter(includesQuery).slice(0, 8).map((item) => ({ type: "payment", id: item.id, title: item.paymentId || item.id, subtitle: `${item.customer || "Customer"} · ${item.amount || 0} ${item.currency || "USD"}`, section: "payments" })),
+    ...values[3].filter(includesQuery).slice(0, 8).map((item) => ({ type: "conversation", id: item.id, title: item.customerName || item.email || "Conversation", subtitle: item.lastMessageText || item.subject || "Customer message", section: "customers" })),
+  ].slice(0, 20);
+  sendJson(response, 200, { results });
+  return true;
+};
+
+const sendAdminSystemValidation = async (request, response) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) return true;
+  const email = await verifyEmailTransport().catch((error) => ({
+    ...getEmailConfigurationStatus(),
+    verified: false,
+    error: error.message,
+  }));
+  const [orders, customers, payments, conversations] = await Promise.all([
+    listSupabaseOrders().catch(() => []),
+    listSupabaseAdminSupportConversations({}).then((items) => new Set(items.map((item) => item.customerId).filter(Boolean))).catch(() => new Set()),
+    listSupabasePayments().catch(() => []),
+    listSupabaseAdminSupportConversations({}).catch(() => []),
+  ]);
+  sendJson(response, 200, {
+    ok: true,
+    email,
+    counts: { orders: orders.length, customers: customers.size, payments: payments.length, messages: conversations.reduce((sum, item) => sum + Number(item.adminUnreadCount || 0), 0) },
+    authenticated: true,
+  });
+  return true;
+};
+
 const handleAdminApi = async (request, response, requestUrl) => {
+  if (requestUrl.pathname === "/api/contact" && request.method === "POST") {
+    return handleContactCreate(request, response);
+  }
+
   if (requestUrl.pathname === "/api/support/conversations" && request.method === "POST") {
     return handleSupportConversationCreate(request, response);
   }
@@ -1848,6 +2197,31 @@ const handleAdminApi = async (request, response, requestUrl) => {
 
   if (requestUrl.pathname === "/api/admin/support/conversations" && request.method === "GET") {
     return sendAdminSupportConversationList(request, response, requestUrl);
+  }
+
+  if (requestUrl.pathname === "/api/admin/notifications" && request.method === "GET") {
+    return sendAdminNotifications(request, response);
+  }
+
+  if (requestUrl.pathname.startsWith("/api/admin/customers/") && request.method === "PATCH") {
+    return handleAdminCustomerUpdate(request, response, decodeURIComponent(requestUrl.pathname.slice("/api/admin/customers/".length)));
+  }
+
+  if (requestUrl.pathname === "/api/admin/notifications/read-all" && request.method === "POST") {
+    return handleAdminNotificationsReadAll(request, response);
+  }
+
+  if (requestUrl.pathname.startsWith("/api/admin/notifications/") && requestUrl.pathname.endsWith("/read") && request.method === "POST") {
+    const id = decodeURIComponent(requestUrl.pathname.slice("/api/admin/notifications/".length, -"/read".length));
+    return handleAdminNotificationRead(request, response, id);
+  }
+
+  if (requestUrl.pathname === "/api/admin/search" && request.method === "GET") {
+    return sendAdminGlobalSearch(request, response, requestUrl);
+  }
+
+  if (requestUrl.pathname === "/api/admin/system/validation" && request.method === "GET") {
+    return sendAdminSystemValidation(request, response);
   }
 
   if (requestUrl.pathname === "/api/admin/support/stream" && request.method === "GET") {
@@ -2356,6 +2730,7 @@ const server = http.createServer(async (request, response) => {
 
 server.on("listening", () => {
   reportStartupEnvWarnings();
+  logEmailConfigurationWarning();
   fs.writeFileSync(pidFile, String(process.pid), "utf8");
   console.log(`Serving ${publicRoot}`);
   console.log(`Local:   http://127.0.0.1:${port}/`);

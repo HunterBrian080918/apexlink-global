@@ -26,6 +26,7 @@ const addJsFiles = (dirPath) => {
 
 addJsFiles(path.join(root, "services"));
 addJsFiles(path.join(root, "scripts"));
+addJsFiles(path.join(root, "public"));
 
 for (const filePath of targets) {
   const result = spawnSync(process.execPath, ["--check", filePath], {

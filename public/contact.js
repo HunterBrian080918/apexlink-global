@@ -238,7 +238,7 @@ const setupContactForm = async () => {
     return;
   }
 
-  contactForm.addEventListener("submit", (event) => {
+  contactForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     if (!contactForm.reportValidity()) {
@@ -262,19 +262,40 @@ const setupContactForm = async () => {
       return;
     }
 
-    const mailtoHref = buildMailtoHref(businessContact.email, fields);
+    const submitButton = contactForm.querySelector('button[type="submit"]');
+    submitButton.disabled = true;
+    submitButton.textContent = "Sending...";
+    setStatus(formStatus, "Sending your inquiry...", "info");
 
-    if (emailLink) {
-      emailLink.setAttribute("href", mailtoHref);
+    try {
+      const response = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: fields.name,
+          email: fields.email,
+          subject: fields.subject,
+          company: fields.company,
+          phone: fields.phone,
+          country: fields.country,
+          message: fields.message,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Unable to send your inquiry.");
+      contactForm.reset();
+      localStorage.removeItem(CONTACT_DRAFT_KEY);
+      setStatus(formStatus, "Thank you. Your inquiry has been sent to our team.", "success");
+    } catch (error) {
+      setStatus(
+        formStatus,
+        `${error.message || "Unable to send your inquiry. Please try again."} You can also use the Email Us link below.`,
+        "error"
+      );
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = "Send Inquiry";
     }
-
-    window.location.href = mailtoHref;
-    saveDraft();
-    setStatus(
-      formStatus,
-      "Your email application has been opened. Please send the prepared email to complete your inquiry.",
-      "success"
-    );
   });
 };
 
