@@ -5,6 +5,7 @@ node_modules/
 logs/
 *.log
 data/admin-auth.json
+data/admin-notifications.json
 # Runtime
 .server.pid
 *.pid

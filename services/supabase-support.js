@@ -132,7 +132,7 @@ const getOrCreateCustomer = async (input) => {
   const startedAt = nowMs();
   const email = sanitizeText(input.email).toLowerCase();
   if (email) {
-    const existingRows = await requestSupabase(`customers?select=id,name,email,phone,country&email=eq.${escapeFilterValue(email)}&limit=1`);
+    const existingRows = await requestSupabase(`customers?select=*&email=eq.${escapeFilterValue(email)}&limit=1`);
     if (Array.isArray(existingRows) && existingRows[0]?.id) {
       return {
         customer: existingRows[0],
@@ -186,14 +186,24 @@ const fetchProductNamesByIds = async (ids) => {
   return new Map((Array.isArray(rows) ? rows : []).map((row) => [String(row.id || ""), String(row.name || "")]));
 };
 
-const enrichConversationRows = async (rows) => {
-  const items = Array.isArray(rows) ? rows : [];
-  const orderMap = await fetchOrderNumbersByIds(items.map((row) => row.related_order_id));
-  const productMap = await fetchProductNamesByIds(items.map((row) => row.related_product_id));
-  return items.map((row) => mapConversationRow(row, orderMap, productMap));
+const fetchCustomersByIds = async (ids) => {
+  const normalizedIds = Array.from(new Set((Array.isArray(ids) ? ids : []).map((item) => sanitizeText(item)).filter(Boolean)));
+  if (!normalizedIds.length) return new Map();
+  const rows = await requestSupabase(`customers?select=*&or=(${normalizedIds.map((id) => `id.eq.${escapeFilterValue(id)}`).join(",")})`);
+  return new Map((Array.isArray(rows) ? rows : []).map((row) => [String(row.id || ""), row]));
 };
 
-const mapConversationRow = (row, orderMap = new Map(), productMap = new Map()) => ({
+const enrichConversationRows = async (rows) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const [orderMap, productMap, customerMap] = await Promise.all([
+    fetchOrderNumbersByIds(items.map((row) => row.related_order_id)),
+    fetchProductNamesByIds(items.map((row) => row.related_product_id)),
+    fetchCustomersByIds(items.map((row) => row.customer_id)),
+  ]);
+  return items.map((row) => mapConversationRow(row, orderMap, productMap, customerMap));
+};
+
+const mapConversationRow = (row, orderMap = new Map(), productMap = new Map(), customerMap = new Map()) => ({
   id: String(row?.id || ""),
   conversationId: String(row?.id || ""),
   customerId: String(row?.customer_id || ""),
@@ -216,6 +226,14 @@ const mapConversationRow = (row, orderMap = new Map(), productMap = new Map()) =
   adminUnreadCount: Number(row?.admin_unread_count || 0),
   createdAt: String(row?.created_at || "").trim(),
   updatedAt: String(row?.updated_at || "").trim(),
+  whatsapp: String(customerMap.get(String(row?.customer_id || ""))?.whatsapp || "").trim(),
+  company: String(customerMap.get(String(row?.customer_id || ""))?.company || "").trim(),
+  customerType: String(customerMap.get(String(row?.customer_id || ""))?.customer_type || "").trim(),
+  customerStatus: String(customerMap.get(String(row?.customer_id || ""))?.customer_status || "").trim(),
+  tags: Array.isArray(customerMap.get(String(row?.customer_id || ""))?.tags) ? customerMap.get(String(row?.customer_id || "")).tags : [],
+  notes: String(customerMap.get(String(row?.customer_id || ""))?.notes || "").trim(),
+  isVip: Boolean(customerMap.get(String(row?.customer_id || ""))?.is_vip),
+  isBlacklisted: Boolean(customerMap.get(String(row?.customer_id || ""))?.is_blacklisted),
 });
 
 const mapMessageRow = (row) => ({
@@ -597,6 +615,27 @@ const markCustomerRead = async (conversationId) => {
   return patchResult.conversation;
 };
 
+const updateCustomerProfile = async (customerId, input = {}) => {
+  const normalizedId = sanitizeText(customerId);
+  if (!normalizedId) throw new Error("Customer ID is required.");
+  const allowedStatuses = new Set(["new", "active", "waiting_customer", "waiting_admin", "vip", "wholesale", "retail", "resolved", "closed", "blocked"]);
+  const status = sanitizeText(input.customerStatus).toLowerCase().replace(/\s+/g, "_");
+  if (status && !allowedStatuses.has(status)) throw new Error("Invalid customer status.");
+  const body = {
+    ...(status ? { customer_status: status } : {}),
+    ...(input.customerType !== undefined ? { customer_type: sanitizeText(input.customerType) || "retail" } : {}),
+    ...(input.whatsapp !== undefined ? { whatsapp: toNullableText(input.whatsapp) } : {}),
+    ...(input.company !== undefined ? { company: toNullableText(input.company) } : {}),
+    ...(input.notes !== undefined ? { notes: toNullableText(input.notes) } : {}),
+    ...(input.tags !== undefined ? { tags: Array.isArray(input.tags) ? input.tags.map(sanitizeText).filter(Boolean) : [] } : {}),
+    ...(input.isVip !== undefined ? { is_vip: Boolean(input.isVip) } : {}),
+    ...(input.isBlacklisted !== undefined ? { is_blacklisted: Boolean(input.isBlacklisted) } : {}),
+    updated_at: nowIso(),
+  };
+  const rows = await requestSupabase(`customers?id=eq.${escapeFilterValue(normalizedId)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body });
+  return Array.isArray(rows) ? rows[0] : null;
+};
+
 module.exports = {
   createConversationWithFirstMessage,
   getConversationById,
@@ -607,4 +646,5 @@ module.exports = {
   updateConversationStatus,
   markAdminRead,
   markCustomerRead,
+  updateCustomerProfile,
 };

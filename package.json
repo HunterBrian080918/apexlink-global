@@ -8,12 +8,14 @@
     "start": "node server.js",
     "dev": "node server.js",
     "check": "node scripts/check-syntax.js",
+    "cleanup:production": "node scripts/cleanup-production-data.js",
     "migrate:admin-auth": "node scripts/migrate-admin-auth-to-supabase.js"
   },
   "engines": {
     "node": ">=20 <25"
   },
   "dependencies": {
-    "dotenv": "^17.2.2"
+    "dotenv": "^17.2.2",
+    "nodemailer": "^9.0.3"
   }
 }
