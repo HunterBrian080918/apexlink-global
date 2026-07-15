@@ -96,7 +96,7 @@
     <nav class="navbar container">
       <a class="logo" href="${ROUTES.home}" aria-label="AvelixLink Home">
         <span class="logo-mark">
-          <img src="/assets/brand/apexlink-mark.png" alt="AvelixLink mark">
+          <img src="/assets/brand/avelixlink-mark.png" alt="AvelixLink mark">
         </span>
         <span class="logo-text">
           <strong>AvelixLink</strong>

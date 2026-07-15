@@ -1,7 +1,7 @@
 (function () {
   let siteConfigCache = null;
   let siteConfigPromise = null;
-  const LOGO_FALLBACK_SRC = "/assets/brand/apexlink-mark.png";
+  const LOGO_FALLBACK_SRC = "/assets/brand/avelixlink-mark.png";
   const LEGACY_WORDMARK_PATHS = new Set([
     "assets/brand/apexlink-wordmark.png",
     "/assets/brand/apexlink-wordmark.png",
@@ -13,7 +13,12 @@
       return LOGO_FALLBACK_SRC;
     }
 
-    if (normalized === "assets/brand/apexlink-mark.png" || normalized === "/assets/brand/apexlink-mark.png") {
+    if (
+      normalized === "assets/brand/apexlink-mark.png" ||
+      normalized === "/assets/brand/apexlink-mark.png" ||
+      normalized === "assets/brand/avelixlink-mark.png" ||
+      normalized === "/assets/brand/avelixlink-mark.png"
+    ) {
       return LOGO_FALLBACK_SRC;
     }
 

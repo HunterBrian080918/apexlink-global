@@ -10,7 +10,8 @@ const defaultDataFile = path.join(__dirname, "..", "data", "default-data.json");
 const WEBSITE_SECTIONS = new Set(["brand", "hero", "footer", "contact", "social", "seo", "homepage"]);
 const APP_SETTING_SECTIONS = new Set(["paymentMethods", "language", "themeColor", "systemConfig"]);
 const ALLOWED_SECTIONS = new Set([...WEBSITE_SECTIONS, ...APP_SETTING_SECTIONS]);
-const LOGO_FALLBACK_PATH = "/assets/brand/apexlink-mark.png";
+const LOGO_FALLBACK_PATH = "/assets/brand/avelixlink-mark.png";
+const FAVICON_FALLBACK_PATH = "/assets/brand/avelixlink-favicon.png";
 const LEGACY_WORDMARK_PATHS = new Set([
   "assets/brand/apexlink-wordmark.png",
   "/assets/brand/apexlink-wordmark.png",
@@ -113,6 +114,50 @@ const normalizePublicWhatsapp = (value, fallback = "+44 7597 653224") => {
   const normalized = String(value ?? "").trim();
   return !normalized || normalized === "+86 138 0000 2211" ? fallback : normalized;
 };
+const parseSystemConfigValue = (value) => {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return {
+      rawText: "",
+      cms: {},
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(normalized);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return {
+        rawText: typeof parsed.__rawText === "string" ? parsed.__rawText : "",
+        cms: parsed.cms && typeof parsed.cms === "object" && !Array.isArray(parsed.cms) ? parsed.cms : {},
+      };
+    }
+  } catch (error) {
+    // Plain text values remain supported for backward compatibility.
+  }
+
+  return {
+    rawText: normalized,
+    cms: {},
+  };
+};
+const serializeSystemConfigValue = (rawText, cms) => {
+  const normalizedRawText = String(rawText ?? "").trim();
+  const normalizedCms = cms && typeof cms === "object" && !Array.isArray(cms) ? cms : {};
+
+  if (!Object.keys(normalizedCms).length) {
+    return normalizedRawText || null;
+  }
+
+  const payload = {
+    cms: normalizedCms,
+  };
+
+  if (normalizedRawText) {
+    payload.__rawText = normalizedRawText;
+  }
+
+  return JSON.stringify(payload);
+};
 const asNullableText = (value) => {
   const normalized = String(value ?? "").trim();
   return normalized || null;
@@ -124,12 +169,39 @@ const normalizeLogoImage = (value, fallback = LOGO_FALLBACK_PATH) => {
     return fallback;
   }
 
-  if (normalized === "assets/brand/apexlink-mark.png") {
+  if (normalized === "assets/brand/apexlink-mark.png" || normalized === "assets/brand/avelixlink-mark.png") {
     return LOGO_FALLBACK_PATH;
   }
 
-  if (normalized === "/assets/brand/apexlink-mark.png") {
+  if (normalized === "/assets/brand/apexlink-mark.png" || normalized === "/assets/brand/avelixlink-mark.png") {
     return LOGO_FALLBACK_PATH;
+  }
+
+  if (/^(https?:)?\/\//i.test(normalized)) {
+    return normalized;
+  }
+
+  if (normalized.startsWith("/assets/")) {
+    return normalized;
+  }
+
+  if (normalized.startsWith("assets/")) {
+    return `/${normalized}`;
+  }
+
+  return fallback;
+};
+const normalizeFaviconImage = (value, fallback = FAVICON_FALLBACK_PATH) => {
+  const normalized = String(value ?? "").trim();
+
+  if (
+    !normalized ||
+    normalized === "assets/brand/apexlink-favicon.png" ||
+    normalized === "/assets/brand/apexlink-favicon.png" ||
+    normalized === "assets/brand/avelixlink-favicon.png" ||
+    normalized === "/assets/brand/avelixlink-favicon.png"
+  ) {
+    return fallback;
   }
 
   if (/^(https?:)?\/\//i.test(normalized)) {
@@ -170,9 +242,9 @@ const buildDefaultSiteConfig = () => {
         logoBottom: normalizeBrandBottom(brand.logoBottom, ""),
         logoImage: normalizeLogoImage(brand.logoImage, LOGO_FALLBACK_PATH),
         logoPublicId: asText(brand.logoPublicId),
-        favicon: asText(brand.favicon, "assets/brand/apexlink-favicon.png"),
+        favicon: normalizeFaviconImage(brand.favicon, FAVICON_FALLBACK_PATH),
         faviconPublicId: asText(brand.faviconPublicId),
-        browserTitle: asText(brand.browserTitle, brandName),
+        browserTitle: asText(brand.browserTitle, `${brandName} | Premium Workspace Innovation`),
         subtitle: asText(brand.subtitle),
       },
       hero: {
@@ -226,7 +298,10 @@ const buildDefaultSiteConfig = () => {
         "An all-in-one portable workspace organizer designed for modern professionals."
       ),
       aboutTitle: asText(homepage.aboutTitle, "Why AvelixLink"),
-      aboutText: asText(homepage.aboutText),
+      aboutText: asText(
+        homepage.aboutText,
+        "At AvelixLink, we combine thoughtful design, practical functionality, and global manufacturing resources to create products that improve workspaces, productivity, and everyday life."
+      ),
       aboutPoints: asStringArray(homepage.aboutPoints || []),
     },
     settings: {
@@ -260,6 +335,9 @@ const ensureValidFeaturedProductId = async (value) => {
 
 const normalizeSiteConfig = (websiteRow, appRow) => {
   const defaults = buildDefaultSiteConfig();
+  const systemConfig = parseSystemConfigValue(appRow?.system_config);
+  const homepageCms =
+    systemConfig.cms?.homepage && typeof systemConfig.cms.homepage === "object" ? systemConfig.cms.homepage : {};
 
   return {
     website: {
@@ -269,7 +347,7 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
         logoBottom: normalizeBrandBottom(websiteRow?.brand_logo_bottom, defaults.website.brand.logoBottom),
         logoImage: normalizeLogoImage(websiteRow?.brand_logo_image, defaults.website.brand.logoImage),
         logoPublicId: asText(websiteRow?.brand_logo_public_id, defaults.website.brand.logoPublicId),
-        favicon: asText(websiteRow?.favicon, defaults.website.brand.favicon),
+        favicon: normalizeFaviconImage(websiteRow?.favicon, defaults.website.brand.favicon),
         faviconPublicId: asText(websiteRow?.favicon_public_id, defaults.website.brand.faviconPublicId),
         browserTitle: asText(websiteRow?.browser_title, defaults.website.brand.browserTitle),
         subtitle: asText(websiteRow?.brand_subtitle, defaults.website.brand.subtitle),
@@ -308,7 +386,7 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
     homepage: {
       eyebrow: asText(websiteRow?.hero_eyebrow, defaults.homepage.eyebrow),
       title: asText(websiteRow?.hero_title, defaults.homepage.title),
-      subtitle: asText(websiteRow?.hero_subtitle, defaults.homepage.subtitle),
+      subtitle: asText(homepageCms.subtitle, asText(websiteRow?.hero_subtitle, defaults.homepage.subtitle)),
       heroBackgroundImage: asText(websiteRow?.hero_background_image, defaults.homepage.heroBackgroundImage),
       heroCtaPrimaryLabel: asText(websiteRow?.hero_cta_primary_label, defaults.homepage.heroCtaPrimaryLabel),
       heroCtaPrimaryLink: asText(websiteRow?.hero_cta_primary_link, defaults.homepage.heroCtaPrimaryLink),
@@ -326,7 +404,7 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
       paymentMethods: withFallbackArray(appRow?.payment_methods, defaults.settings.paymentMethods),
       language: asText(appRow?.language, defaults.settings.language),
       themeColor: asText(appRow?.theme_color, defaults.settings.themeColor),
-      systemConfig: asText(appRow?.system_config, defaults.settings.systemConfig),
+      systemConfig: asText(systemConfig.rawText, defaults.settings.systemConfig),
     },
   };
 };
@@ -371,7 +449,6 @@ const mergeSiteConfig = (current, patch) => {
       ...next.homepage,
       eyebrow: next.website.hero.eyebrow,
       title: next.website.hero.title,
-      subtitle: next.website.hero.subtitle,
       heroBackgroundImage: next.website.hero.backgroundImage,
     };
   }
@@ -381,7 +458,6 @@ const mergeSiteConfig = (current, patch) => {
       ...next.website.hero,
       eyebrow: next.homepage.eyebrow,
       title: next.homepage.title,
-      subtitle: next.homepage.subtitle,
       backgroundImage: next.homepage.heroBackgroundImage,
     };
   }
@@ -403,7 +479,7 @@ const serializeWebsiteSettingsRow = (config, existingRow) => ({
   brand_subtitle: asNullableText(config?.website?.brand?.subtitle),
   hero_eyebrow: asNullableText(config?.homepage?.eyebrow || config?.website?.hero?.eyebrow),
   hero_title: asNullableText(config?.homepage?.title || config?.website?.hero?.title),
-  hero_subtitle: asNullableText(config?.homepage?.subtitle || config?.website?.hero?.subtitle),
+  hero_subtitle: asNullableText(config?.website?.hero?.subtitle || config?.homepage?.subtitle),
   hero_background_image: asNullableText(
     config?.homepage?.heroBackgroundImage || config?.website?.hero?.backgroundImage
   ),
@@ -435,23 +511,48 @@ const serializeWebsiteSettingsRow = (config, existingRow) => ({
   updated_at: nowIso(),
 });
 
-const serializeAppSettingsRow = (config, existingRow) => ({
-  ...(existingRow || {}),
-  id: 1,
-  platform_name: asNullableText(existingRow?.platform_name || config?.website?.brand?.name || "AvelixLink"),
-  platform_version:
-    Number.isFinite(Number(existingRow?.platform_version)) && Number(existingRow.platform_version) > 0
-      ? Number(existingRow.platform_version)
-      : 1,
-  admin_login_email: existingRow?.admin_login_email || null,
-  recovery_email: existingRow?.recovery_email || null,
-  payment_methods: asStringArray(config?.settings?.paymentMethods),
-  language: asNullableText(config?.settings?.language),
-  theme_color: asNullableText(config?.settings?.themeColor),
-  system_config: asNullableText(config?.settings?.systemConfig),
-  created_at: existingRow?.created_at || nowIso(),
-  updated_at: nowIso(),
-});
+const serializeAppSettingsRow = (config, existingRow) => {
+  const existingSystemConfig = parseSystemConfigValue(existingRow?.system_config);
+  const nextCms = {
+    ...(existingSystemConfig.cms && typeof existingSystemConfig.cms === "object" ? existingSystemConfig.cms : {}),
+  };
+  const nextHomepageCms =
+    nextCms.homepage && typeof nextCms.homepage === "object" && !Array.isArray(nextCms.homepage)
+      ? { ...nextCms.homepage }
+      : {};
+  const homepageSubtitle = asNullableText(config?.homepage?.subtitle);
+  const heroSubtitle = asNullableText(config?.website?.hero?.subtitle);
+
+  if (homepageSubtitle && heroSubtitle && homepageSubtitle !== heroSubtitle) {
+    nextHomepageCms.subtitle = homepageSubtitle;
+  } else {
+    delete nextHomepageCms.subtitle;
+  }
+
+  if (Object.keys(nextHomepageCms).length) {
+    nextCms.homepage = nextHomepageCms;
+  } else {
+    delete nextCms.homepage;
+  }
+
+  return {
+    ...(existingRow || {}),
+    id: 1,
+    platform_name: asNullableText(existingRow?.platform_name || config?.website?.brand?.name || "AvelixLink"),
+    platform_version:
+      Number.isFinite(Number(existingRow?.platform_version)) && Number(existingRow.platform_version) > 0
+        ? Number(existingRow.platform_version)
+        : 1,
+    admin_login_email: existingRow?.admin_login_email || null,
+    recovery_email: existingRow?.recovery_email || null,
+    payment_methods: asStringArray(config?.settings?.paymentMethods),
+    language: asNullableText(config?.settings?.language),
+    theme_color: asNullableText(config?.settings?.themeColor),
+    system_config: serializeSystemConfigValue(config?.settings?.systemConfig, nextCms),
+    created_at: existingRow?.created_at || nowIso(),
+    updated_at: nowIso(),
+  };
+};
 
 const writeSingleRow = async (tableName, row, existingRow) => {
   if (existingRow?.id) {
@@ -494,14 +595,13 @@ const getSiteConfigSection = async (section) => {
 
 const toPatchPayload = (input) => {
   const source = asObject(input);
-  const patch = {
-    website: {},
-    homepage: {},
-    settings: {},
-  };
+  const patch = {};
 
   ["brand", "hero", "footer", "contact", "social", "seo"].forEach((key) => {
     if (source[key] !== undefined) {
+      if (!patch.website) {
+        patch.website = {};
+      }
       patch.website[key] = asObject(source[key]);
     }
   });
@@ -512,6 +612,9 @@ const toPatchPayload = (input) => {
 
   ["paymentMethods", "language", "themeColor", "systemConfig"].forEach((key) => {
     if (source[key] !== undefined) {
+      if (!patch.settings) {
+        patch.settings = {};
+      }
       patch.settings[key] = source[key];
     }
   });

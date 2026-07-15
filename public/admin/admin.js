@@ -1035,7 +1035,7 @@ const MEDIA_FOLDER_OPTIONS = [
   { value: "apexlink/misc", label: "avelixlink/misc" },
 ];
 const CLOUDINARY_URL_PREFIX = "https://res.cloudinary.com/";
-const LOGO_FALLBACK_SRC = "/assets/brand/apexlink-mark.png";
+const LOGO_FALLBACK_SRC = "/assets/brand/avelixlink-mark.png";
 
 const formatMediaBytes = (value) => {
   const bytes = Number(value || 0);
@@ -1497,7 +1497,7 @@ const applyBrand = (website) => {
     rawLogoImage === "assets/brand/apexlink-wordmark.png" ||
     rawLogoImage === "/assets/brand/apexlink-wordmark.png"
       ? LOGO_FALLBACK_SRC
-      : rawLogoImage === "assets/brand/apexlink-mark.png"
+      : rawLogoImage === "assets/brand/apexlink-mark.png" || rawLogoImage === "assets/brand/avelixlink-mark.png"
         ? LOGO_FALLBACK_SRC
         : rawLogoImage;
 

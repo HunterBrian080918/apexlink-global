@@ -41,18 +41,18 @@
         name: "AvelixLink",
         logoTop: "AvelixLink",
         logoBottom: "",
-        logoImage: "/assets/brand/apexlink-mark.png",
+        logoImage: "/assets/brand/avelixlink-mark.png",
         logoPublicId: "",
-        favicon: "/assets/brand/apexlink-favicon.png",
+        favicon: "/assets/brand/avelixlink-favicon.png",
         faviconPublicId: "",
-        browserTitle: "AvelixLink",
+        browserTitle: "AvelixLink | Premium Workspace Innovation",
         subtitle: "",
       },
       hero: {
         eyebrow: "PREMIUM WORKSPACE SOLUTIONS",
         title: "Reimagine\nYour Workspace.",
         subtitle:
-          "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, AvelixLink helps people build better workspaces.",
+          "AvelixLink creates thoughtfully designed products that improve modern workspaces, productivity, and everyday life.",
         backgroundImage: "/assets/images/ny-hero.jpg",
         backgroundImagePublicId: "",
         banner: "",
@@ -90,7 +90,7 @@
       eyebrow: "PREMIUM WORKSPACE SOLUTIONS",
       title: "Reimagine\nYour Workspace.",
       subtitle:
-        "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, AvelixLink helps people build better workspaces.",
+        "Premium products designed to simplify modern workspaces and everyday life.",
       heroBackgroundImage: "/assets/images/ny-hero.jpg",
       heroCtaPrimaryLabel: "Explore Products",
       heroCtaPrimaryLink: "/products",
@@ -102,7 +102,7 @@
       spotlightSubtitle: "An all-in-one portable workspace organizer designed for modern professionals.",
       aboutTitle: "Why AvelixLink",
       aboutText:
-        "At AvelixLink, we believe great ideas begin with a great workspace.\n\nWe create premium workspace products that combine thoughtful design, quality materials and practical functionality to help professionals work smarter every day.",
+        "At AvelixLink, we combine thoughtful design, practical functionality, and global manufacturing resources to create products that improve workspaces, productivity, and everyday life.",
       aboutPoints: [
         "Thoughtful design for everyday work",
         "Quality materials with a premium finish",
@@ -774,13 +774,13 @@
         name: useUpdatedCopy(brand.name, "AvelixLink", ["ApexLink Global", "ApexLink"]),
         logoTop: useUpdatedCopy(brand.logoTop, "AvelixLink", ["ApexLink"]),
         logoBottom: useUpdatedCopy(brand.logoBottom, "", ["Global"]),
-        logoImage: String(brand.logoImage || "assets/brand/apexlink-mark.png"),
+        logoImage: String(brand.logoImage || "assets/brand/avelixlink-mark.png"),
         logoPublicId: String(brand.logoPublicId || ""),
-        favicon: String(brand.favicon || "assets/brand/apexlink-favicon.png"),
+        favicon: String(brand.favicon || "assets/brand/avelixlink-favicon.png"),
         faviconPublicId: String(brand.faviconPublicId || ""),
         browserTitle: useUpdatedCopy(
           brand.browserTitle,
-          "AvelixLink | Premium Workspace Solutions",
+          "AvelixLink | Premium Workspace Innovation",
           ["AvelixLink | AI-Powered Global Sourcing Platform"]
         ),
         subtitle: useUpdatedCopy(brand.subtitle, "Premium Workspace Solutions", ["AI-Powered Global Sourcing Platform"]),
@@ -790,7 +790,7 @@
         title: useUpdatedCopy(hero.title, "Reimagine\nYour Workspace.", ["AI-Powered Global Sourcing Platform"]),
         subtitle: useUpdatedCopy(
           hero.subtitle,
-          "Premium workspace products designed to improve productivity, organization and comfort.\n\nFrom smart desk accessories to innovative workspace solutions, AvelixLink helps people build better workspaces.",
+          "AvelixLink creates thoughtfully designed products that improve modern workspaces, productivity, and everyday life.",
           ["Connect with trusted suppliers, compare products, and manage international trade with intelligent sourcing tools."]
         ),
         backgroundImage: String(hero.backgroundImage || "assets/images/ny-hero.jpg"),
@@ -942,7 +942,7 @@
         ]),
         aboutText: useUpdatedCopy(
           homepage.aboutText,
-          "At AvelixLink, we believe great ideas begin with a great workspace.\n\nWe create premium workspace products that combine thoughtful design, quality materials and practical functionality to help professionals work smarter every day.",
+          "At AvelixLink, we combine thoughtful design, practical functionality, and global manufacturing resources to create products that improve workspaces, productivity, and everyday life.",
           [
             "AvelixLink is a modern sourcing platform for premium product discovery. It combines an AI-style matching experience with a minimalist product catalog and detail pages suitable for international buyers, distributors, and sourcing teams.",
           ]

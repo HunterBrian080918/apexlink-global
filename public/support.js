@@ -20,7 +20,7 @@ const supportFormStatus = document.querySelector("#support-form-status");
 const VISITOR_THREAD_ID_KEY = "northstar-visitor-thread-id";
 const SUPPORT_PROFILE_KEY = "northstar-support-profile-v1";
 const PLATFORM_STORAGE_KEY = "northstar-platform-store-v1";
-const assistantAvatar = "assets/brand/apexlink-favicon.png";
+const assistantAvatar = "assets/brand/avelixlink-favicon.png";
 const SUPPORT_MESSAGE_POLL_INTERVAL_MS = 2000;
 
 let currentConversation = null;
