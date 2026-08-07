@@ -125,6 +125,7 @@ const mapPaymentRow = (row) => ({
   orderType: String(row?.order_type || row?.purchase_mode || "retail").trim().toLowerCase(),
   paymentType: normalizePaymentType(row?.payment_type),
   paymentMethod: String(row?.payment_method || "").trim(),
+  paymentProvider: String(row?.payment_provider || "").trim(),
   settlementChannel: String(row?.settlement_channel || "").trim(),
   amount: Number(row?.amount || 0),
   currency: String(row?.currency || "USD").trim().toUpperCase(),
@@ -133,7 +134,10 @@ const mapPaymentRow = (row) => ({
   billingAddress: String(row?.billing_address || "").trim(),
   customerEmail: String(row?.customer_email || "").trim(),
   customerPhone: String(row?.customer_phone || "").trim(),
+  transactionId: String(row?.transaction_id || row?.provider_reference || "").trim(),
   providerReference: String(row?.provider_reference || "").trim(),
+  paypalOrderId: String(row?.paypal_order_id || "").trim(),
+  paypalCaptureId: String(row?.paypal_capture_id || "").trim(),
   note: String(row?.note || "").trim(),
   status: String(row?.status || "pending")
     .trim()
@@ -169,6 +173,30 @@ const listPaymentsByOrder = async (orderId) => {
     `payments?select=*&order_id=eq.${escapeFilterValue(normalizedOrderId)}&order=created_at.asc`
   );
   return Array.isArray(rows) ? rows.map(mapPaymentRow) : [];
+};
+
+const getPaymentByPayPalOrderId = async (paypalOrderId) => {
+  const normalized = String(paypalOrderId || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const rows = await requestSupabase(
+    `payments?select=*&paypal_order_id=eq.${escapeFilterValue(normalized)}&limit=1`
+  );
+  return Array.isArray(rows) && rows[0] ? mapPaymentRow(rows[0]) : null;
+};
+
+const getPaymentByPayPalCaptureId = async (paypalCaptureId) => {
+  const normalized = String(paypalCaptureId || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const rows = await requestSupabase(
+    `payments?select=*&paypal_capture_id=eq.${escapeFilterValue(normalized)}&limit=1`
+  );
+  return Array.isArray(rows) && rows[0] ? mapPaymentRow(rows[0]) : null;
 };
 
 const hasDepositConfiguration = (order) =>
@@ -256,6 +284,7 @@ const createPaymentForOrder = async (orderId, input) => {
     order_type: String(order.purchaseMode || "retail").trim().toLowerCase(),
     payment_type: paymentType,
     payment_method: paymentMethod,
+    payment_provider: String(input?.paymentProvider || "").trim() || null,
     amount,
     currency: String(order.currency || input?.currency || "USD").trim().toUpperCase(),
     deposit_amount: depositAmount,
@@ -263,7 +292,10 @@ const createPaymentForOrder = async (orderId, input) => {
     billing_address: String(order.billingAddress || order.shippingAddress || "").trim() || null,
     customer_email: String(order.email || "").trim().toLowerCase() || null,
     customer_phone: String(order.phone || "").trim() || null,
+    transaction_id: String(input?.transactionId || input?.providerReference || "").trim() || null,
     provider_reference: String(input?.providerReference || "").trim() || null,
+    paypal_order_id: String(input?.paypalOrderId || "").trim() || null,
+    paypal_capture_id: String(input?.paypalCaptureId || "").trim() || null,
     note: String(input?.note || "").trim() || null,
     status: normalizePaymentStatus(input?.status || "pending"),
     created_at: nowIso(),
@@ -281,7 +313,11 @@ const createPaymentForOrder = async (orderId, input) => {
     });
   } catch (error) {
     const message = String(error?.message || "");
-    if (/provider_reference|note/i.test(message)) {
+    if (/payment_provider|transaction_id|paypal_order_id|paypal_capture_id|provider_reference|note/i.test(message)) {
+      delete insertPayload.payment_provider;
+      delete insertPayload.transaction_id;
+      delete insertPayload.paypal_order_id;
+      delete insertPayload.paypal_capture_id;
       delete insertPayload.provider_reference;
       delete insertPayload.note;
       createdRows = await requestSupabase("payments", {
@@ -306,7 +342,7 @@ const createPaymentForOrder = async (orderId, input) => {
     throw new Error("Supabase did not return the created payment.");
   }
 
-  const nextOrderPaymentStatus = paymentType === "deposit" ? "pending" : "pending";
+  const nextOrderPaymentStatus = createdPayment.status || "pending";
   const updatedOrder = await updateOrder(
     order.id,
     {
@@ -337,11 +373,12 @@ const createPaymentForOrder = async (orderId, input) => {
   };
 };
 
-const updatePayment = async (paymentId, partial) => {
+const updatePayment = async (paymentId, partial, options = {}) => {
   const normalizedPaymentId = String(paymentId || "").trim();
   if (!normalizedPaymentId) {
     throw new Error("Payment id is required.");
   }
+  const createdBy = String(options.createdBy || "admin").trim() || "admin";
 
   const existing = await getPaymentById(normalizedPaymentId);
   if (!existing?.id) {
@@ -358,6 +395,22 @@ const updatePayment = async (paymentId, partial) => {
 
   if (partial?.providerReference !== undefined) {
     patch.provider_reference = String(partial.providerReference || "").trim() || null;
+  }
+
+  if (partial?.transactionId !== undefined) {
+    patch.transaction_id = String(partial.transactionId || "").trim() || null;
+  }
+
+  if (partial?.paymentProvider !== undefined) {
+    patch.payment_provider = String(partial.paymentProvider || "").trim() || null;
+  }
+
+  if (partial?.paypalOrderId !== undefined) {
+    patch.paypal_order_id = String(partial.paypalOrderId || "").trim() || null;
+  }
+
+  if (partial?.paypalCaptureId !== undefined) {
+    patch.paypal_capture_id = String(partial.paypalCaptureId || "").trim() || null;
   }
 
   if (partial?.note !== undefined) {
@@ -380,7 +433,11 @@ const updatePayment = async (paymentId, partial) => {
     });
   } catch (error) {
     const message = String(error?.message || "");
-    if (/provider_reference|note/i.test(message)) {
+    if (/payment_provider|transaction_id|paypal_order_id|paypal_capture_id|provider_reference|note/i.test(message)) {
+      delete patch.payment_provider;
+      delete patch.transaction_id;
+      delete patch.paypal_order_id;
+      delete patch.paypal_capture_id;
       delete patch.provider_reference;
       delete patch.note;
       updatedRows = await requestSupabase(`payments?id=eq.${escapeFilterValue(normalizedPaymentId)}`, {
@@ -412,7 +469,7 @@ const updatePayment = async (paymentId, partial) => {
         eventType: "payment_marked_paid",
         title: "Payment marked paid",
         description: `${formatPaymentStatusLabel(updatedPayment.paymentType)} payment was marked paid.`,
-        createdBy: "admin",
+        createdBy,
         metadata: {
           paymentId: updatedPayment.id,
           paymentType: updatedPayment.paymentType,
@@ -423,7 +480,7 @@ const updatePayment = async (paymentId, partial) => {
         eventType: "refunded",
         title: "Refund recorded",
         description: `${formatPaymentStatusLabel(updatedPayment.paymentType)} payment was marked refunded.`,
-        createdBy: "admin",
+        createdBy,
         metadata: {
           paymentId: updatedPayment.id,
           paymentType: updatedPayment.paymentType,
@@ -439,6 +496,8 @@ module.exports = {
   listPayments,
   getPaymentById,
   listPaymentsByOrder,
+  getPaymentByPayPalOrderId,
+  getPaymentByPayPalCaptureId,
   createPaymentForOrder,
   updatePayment,
   isRevenueStatus,

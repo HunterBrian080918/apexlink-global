@@ -21,6 +21,7 @@ let currentProduct = null;
 let isSubmittingPayment = false;
 let currentPayments = [];
 let currentSiteSettings = null;
+let isCapturingPayPal = false;
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -56,6 +57,8 @@ const requestJson = async (url, options = {}) => {
 
   return payload;
 };
+
+const isPaidStatus = (value) => String(value || "").trim().toLowerCase() === "paid";
 
 const fetchOrderPayments = async (orderId) => {
   const payload = await requestJson(`/api/orders/${encodeURIComponent(orderId)}/payments`, {
@@ -121,6 +124,10 @@ const setupRevealAnimations = () => {
 const formatCurrency = (value) => `$${Number(String(value || "").replace(/[^\d.-]/g, "") || 0).toFixed(2)}`;
 
 const getPaymentMethods = (mode) => {
+  if (mode === "retail") {
+    return ["PayPal"];
+  }
+
   const configured = Array.isArray(currentSiteSettings?.paymentMethods)
     ? currentSiteSettings.paymentMethods.map((item) => String(item || "").trim()).filter(Boolean)
     : [];
@@ -165,6 +172,9 @@ const isPaymentFlowComplete = (order, payments) => {
   return !nextType;
 };
 
+const getPrimaryRetailPayment = (payments) =>
+  (Array.isArray(payments) ? payments : []).find((payment) => payment.paymentType === "full-payment") || null;
+
 const getPaymentTypeLabel = (type) =>
   ({
     deposit: "Deposit",
@@ -195,6 +205,49 @@ const renderPaymentMethods = (mode, selectedMethod = "") => {
       `
     )
     .join("");
+};
+
+const getPaymentSubmitButton = () => paymentForm?.querySelector('button[type="submit"]') || null;
+
+const setSubmitButtonState = () => {
+  const submitButton = getPaymentSubmitButton();
+  if (!submitButton || !currentOrder) {
+    return;
+  }
+
+  const retailPaid = currentOrder.purchaseMode === "retail" && (
+    isPaidStatus(currentOrder.paymentStatus) ||
+    isPaidStatus(currentOrder.orderStatus) ||
+    currentPayments.some((payment) => isPaidStatus(payment.status))
+  );
+
+  if (isCapturingPayPal) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Capturing PayPal Payment...";
+    return;
+  }
+
+  if (isSubmittingPayment) {
+    submitButton.disabled = true;
+    submitButton.textContent = currentOrder.purchaseMode === "retail" ? "Redirecting to PayPal..." : "Saving Payment Method...";
+    return;
+  }
+
+  if (retailPaid) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Payment Completed";
+    return;
+  }
+
+  if (currentOrder.purchaseMode === "retail") {
+    submitButton.disabled = false;
+    submitButton.textContent = "Continue to PayPal";
+    return;
+  }
+
+  const isComplete = isPaymentFlowComplete(currentOrder, currentPayments);
+  submitButton.disabled = isComplete;
+  submitButton.textContent = isComplete ? "Payment Method Confirmed" : "Confirm Payment Method";
 };
 
 const renderBuyerDetails = (order) => {
@@ -344,17 +397,13 @@ const setupPaymentForm = () => {
   paymentForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    if (isSubmittingPayment || !currentOrder?.id) {
+    if (isSubmittingPayment || isCapturingPayPal || !currentOrder?.id) {
       return;
     }
 
-    const submitButton = paymentForm.querySelector('button[type="submit"]');
-
     try {
       isSubmittingPayment = true;
-      if (submitButton) {
-        submitButton.disabled = true;
-      }
+      setSubmitButtonState();
       if (paymentStatus) {
         paymentStatus.textContent = "";
       }
@@ -364,6 +413,26 @@ const setupPaymentForm = () => {
 
       if (!paymentMethod) {
         throw new Error("No payment method selected.");
+      }
+
+      if (currentOrder.purchaseMode === "retail") {
+        const payload = await requestJson("/api/paypal/create-order", {
+          method: "POST",
+          body: JSON.stringify({
+            orderId: currentOrder.id,
+          }),
+        });
+
+        if (!payload?.approvalUrl) {
+          throw new Error("PayPal did not return an approval link.");
+        }
+
+        if (paymentStatus) {
+          paymentStatus.textContent = "Redirecting to PayPal...";
+        }
+
+        window.location.href = payload.approvalUrl;
+        return;
       }
 
       const paymentType = getNextPaymentType(currentOrder, currentPayments);
@@ -392,28 +461,93 @@ const setupPaymentForm = () => {
       }
 
       renderPaymentMethods(currentOrder.purchaseMode || "retail", paymentMethod);
-      if (submitButton) {
-        const isComplete = isPaymentFlowComplete(currentOrder, currentPayments);
-        submitButton.disabled = isComplete;
-        submitButton.textContent = isComplete ? "Payment Method Confirmed" : "Confirm Payment Method";
-      }
+      setSubmitButtonState();
     } catch (error) {
       console.error("Payment method update failed:", error);
       if (paymentStatus) {
         paymentStatus.textContent = `Unable to save the payment method: ${error?.message || "Unknown error."}`;
       }
-      if (submitButton) {
-        submitButton.disabled = false;
-      }
       isSubmittingPayment = false;
+      setSubmitButtonState();
       return;
     }
 
-    if (submitButton) {
-      submitButton.disabled = false;
-    }
     isSubmittingPayment = false;
+    setSubmitButtonState();
   });
+};
+
+const handlePayPalReturnState = async () => {
+  if (!currentOrder?.id) {
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const cancelled = params.get("paypal") === "cancelled";
+  const paypalOrderId = String(params.get("token") || "").trim();
+
+  if (cancelled && paymentStatus) {
+    paymentStatus.textContent = "PayPal checkout was cancelled. You can try again when ready.";
+  }
+
+  if (!paypalOrderId) {
+    return;
+  }
+
+  const primaryPayment = getPrimaryRetailPayment(currentPayments);
+  if (isPaidStatus(currentOrder.paymentStatus) || isPaidStatus(primaryPayment?.status)) {
+    params.delete("token");
+    params.delete("PayerID");
+    params.delete("payerId");
+    params.delete("paypal");
+    const nextUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState({}, "", nextUrl.replace(/\?$/, ""));
+    if (paymentStatus) {
+      paymentStatus.textContent = "PayPal payment already completed.";
+    }
+    setSubmitButtonState();
+    return;
+  }
+
+  try {
+    isCapturingPayPal = true;
+    setSubmitButtonState();
+    if (paymentStatus) {
+      paymentStatus.textContent = "Capturing PayPal payment...";
+    }
+
+    const payload = await requestJson("/api/paypal/capture-order", {
+      method: "POST",
+      body: JSON.stringify({
+        orderId: currentOrder.id,
+        paypalOrderId,
+      }),
+    });
+
+    currentOrder = payload?.order || currentOrder;
+    currentPayments = await fetchOrderPayments(currentOrder.id);
+
+    params.delete("token");
+    params.delete("PayerID");
+    params.delete("payerId");
+    params.delete("paypal");
+    const nextUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState({}, "", nextUrl.replace(/\?$/, ""));
+
+    if (paymentStatus) {
+      paymentStatus.textContent = payload?.alreadyPaid
+        ? "PayPal payment already completed."
+        : "PayPal payment completed successfully.";
+    }
+  } catch (error) {
+    console.error("PayPal capture failed:", error);
+    if (paymentStatus) {
+      paymentStatus.textContent = `Unable to capture the PayPal payment: ${error?.message || "Unknown error."}`;
+    }
+  } finally {
+    isCapturingPayPal = false;
+    setSubmitButtonState();
+  }
 };
 
 const initPaymentPage = async () => {
@@ -459,15 +593,8 @@ const initPaymentPage = async () => {
   renderTotals(currentOrder);
   renderBuyerDetails(currentOrder);
   renderPaymentMethods(currentOrder.purchaseMode || "retail", currentOrder.paymentMethod || "");
-
-  if (currentPayments.length) {
-    const submitButton = paymentForm?.querySelector('button[type="submit"]');
-    if (submitButton) {
-      const isComplete = isPaymentFlowComplete(currentOrder, currentPayments);
-      submitButton.disabled = isComplete;
-      submitButton.textContent = isComplete ? "Payment Method Confirmed" : "Confirm Payment Method";
-    }
-  }
+  setSubmitButtonState();
+  await handlePayPalReturnState();
 };
 
 setupNavigation();

@@ -31,6 +31,8 @@ const {
   listPayments: listSupabasePayments,
   getPaymentById: getSupabasePaymentById,
   listPaymentsByOrder: listSupabasePaymentsByOrder,
+  getPaymentByPayPalOrderId: getSupabasePaymentByPayPalOrderId,
+  getPaymentByPayPalCaptureId: getSupabasePaymentByPayPalCaptureId,
   createPaymentForOrder: createSupabasePaymentForOrder,
   updatePayment: updateSupabasePayment,
 } = require("./services/supabase-payments");
@@ -85,6 +87,11 @@ const {
   logEmailConfigurationWarning,
   getEmailConfigurationStatus,
 } = require("./services/email-notifications");
+const {
+  createOrder: createPayPalOrder,
+  captureOrder: capturePayPalOrder,
+  verifyWebhookSignature: verifyPayPalWebhookSignature,
+} = require("./services/paypal");
 const { createContactInquiry, validateContactPayload } = require("./services/supabase-contact");
 const { recordVisit: recordSupabaseVisit } = require("./services/supabase-analytics");
 const { buildDashboard: buildSupabaseDashboard } = require("./services/supabase-dashboard");
@@ -130,6 +137,113 @@ const buildAdminDeepLink = (section, entityId) => {
     return `${base}?section=${encodeURIComponent(section)}`;
   }
   return `${base}?section=${encodeURIComponent(section)}&id=${encodeURIComponent(entityId)}`;
+};
+const getPayPalReturnUrl = (request, orderId, status = "success") => {
+  const url = new URL("/payment", `${getRequestOrigin(request)}/`);
+  url.searchParams.set("orderId", String(orderId || "").trim());
+  if (status === "cancelled") {
+    url.searchParams.set("paypal", "cancelled");
+  }
+  return url.toString();
+};
+
+const isPaidStatus = (value) => String(value || "").trim().toLowerCase() === "paid";
+
+const getPrimaryRetailPayment = (payments) =>
+  (Array.isArray(payments) ? payments : []).find((payment) => payment.paymentType === "full-payment") || null;
+
+const ensureRetailPayPalPayment = async (order) => {
+  const existingPayments = await listSupabasePaymentsByOrder(order.id);
+  const primaryPayment = getPrimaryRetailPayment(existingPayments);
+
+  if (primaryPayment?.id) {
+    if (
+      String(primaryPayment.paymentMethod || "").trim() !== "PayPal" ||
+      String(primaryPayment.paymentProvider || "").trim().toLowerCase() !== "paypal"
+    ) {
+      const updatedPayment = await updateSupabasePayment(
+        primaryPayment.id,
+        {
+          paymentMethod: "PayPal",
+          paymentProvider: "paypal",
+        },
+        {
+          createdBy: "system",
+        }
+      );
+      return {
+        payment: updatedPayment,
+        order,
+      };
+    }
+
+    return {
+      payment: primaryPayment,
+      order,
+    };
+  }
+
+  return createSupabasePaymentForOrder(order.id, {
+    paymentMethod: "PayPal",
+    paymentProvider: "paypal",
+    paymentType: "full-payment",
+    status: "unpaid",
+  });
+};
+
+const finalizePayPalPaymentSuccess = async ({ order, payment, paypalOrderId, paypalCaptureId, paidAt, source }) => {
+  if (!order?.id) {
+    throw new Error("Order not found for PayPal capture.");
+  }
+
+  if (!payment?.id) {
+    throw new Error("Payment record not found for PayPal capture.");
+  }
+
+  if (isPaidStatus(payment.status) && String(payment.paypalCaptureId || "").trim() === String(paypalCaptureId || "").trim()) {
+    const refreshedOrder = await getSupabaseOrderById(order.id);
+    return {
+      order: refreshedOrder || order,
+      payment,
+      alreadyPaid: true,
+    };
+  }
+
+  const updatedPayment = await updateSupabasePayment(
+    payment.id,
+    {
+      paymentMethod: "PayPal",
+      paymentProvider: "paypal",
+      transactionId: paypalCaptureId,
+      paypalOrderId,
+      paypalCaptureId,
+      providerReference: paypalCaptureId,
+      status: "paid",
+      paidAt: paidAt || nowIso(),
+      note: "",
+    },
+    {
+      createdBy: source || "system",
+    }
+  );
+
+  const updatedOrder = await updateSupabaseOrder(
+    order.id,
+    {
+      paymentMethod: "PayPal",
+      paymentStatus: "paid",
+      orderStatus: "paid",
+    },
+    {
+      createdBy: source || "system",
+    }
+  );
+
+  return {
+    order: updatedOrder,
+    payment: updatedPayment,
+    alreadyPaid: false,
+  };
 };
 const buildNotificationMetadata = (input = {}) => ({
   customerName: String(input.customerName || "").trim() || null,
@@ -1442,9 +1556,24 @@ const handleOrderCreate = async (request, response) => {
   try {
     const body = await readJsonBody(request);
     const orderInput = body?.order && typeof body.order === "object" ? body.order : body;
-    const order = await createSupabaseOrder(orderInput);
+    let order = await createSupabaseOrder(orderInput);
+    let createdPayment = null;
 
     const isWholesale = String(order?.purchaseMode || orderInput?.purchaseMode || "").toLowerCase() === "wholesale";
+    if (!isWholesale && order?.id) {
+      try {
+        const paymentPayload = await ensureRetailPayPalPayment(order);
+        createdPayment = paymentPayload.payment || null;
+        order = paymentPayload.order || order;
+      } catch (paymentError) {
+        try {
+          await deleteSupabaseOrder(order.id);
+        } catch (cleanupError) {
+          console.error("[orders] retail payment cleanup failed:", cleanupError);
+        }
+        throw paymentError;
+      }
+    }
     const adminLink = buildAdminDeepLink("order", order?.id);
     notifyAdmin({
       type: isWholesale ? "new_wholesale_inquiry" : "new_retail_order",
@@ -1475,6 +1604,7 @@ const handleOrderCreate = async (request, response) => {
     sendJson(response, 201, {
       ok: true,
       order,
+      payment: createdPayment,
     });
   } catch (error) {
     console.error("[orders] create failed:", error);
@@ -1725,7 +1855,9 @@ const handlePaymentUpdate = async (request, response, paymentId) => {
   try {
     const body = await readJsonBody(request);
     const paymentInput = body?.payment && typeof body.payment === "object" ? body.payment : body;
-    const payment = await updateSupabasePayment(paymentId, paymentInput);
+    const payment = await updateSupabasePayment(paymentId, paymentInput, {
+      createdBy: auth.session.email || "admin",
+    });
     sendJson(response, 200, {
       ok: true,
       payment,
@@ -1734,6 +1866,241 @@ const handlePaymentUpdate = async (request, response, paymentId) => {
     console.error("[payments] update failed:", error);
     sendJson(response, error?.status || 400, {
       error: error?.message || "Unable to update payment.",
+    });
+  }
+
+  return true;
+};
+
+const handlePayPalOrderCreate = async (request, response) => {
+  try {
+    const body = await readJsonBody(request);
+    const orderId = String(body?.orderId || "").trim();
+    if (!orderId) {
+      throw new Error("Order id is required.");
+    }
+
+    const order = await getSupabaseOrderById(orderId);
+    if (!order?.id) {
+      sendJson(response, 404, { error: "Order not found." });
+      return true;
+    }
+
+    if (String(order.purchaseMode || "").trim().toLowerCase() !== "retail") {
+      throw new Error("PayPal Checkout is available for retail orders only.");
+    }
+
+    if (isPaidStatus(order.paymentStatus) || isPaidStatus(order.orderStatus)) {
+      throw new Error("This order has already been paid.");
+    }
+
+    const paymentPayload = await ensureRetailPayPalPayment(order);
+    const payment = paymentPayload.payment;
+    const amount = Number(String(payment?.amount || 0).replace(/[^\d.-]/g, "") || 0);
+
+    if (String(order.orderStatus || "").trim().toLowerCase() !== "pending_payment") {
+      throw new Error("PayPal checkout is only available while the order is pending payment.");
+    }
+
+    const paypalOrder = await createPayPalOrder({
+      amount,
+      currency: payment?.currency || order.currency || "USD",
+      description: `${order.productName || "AvelixLink order"} (${order.orderNumber || order.orderId || order.id})`,
+      referenceId: payment?.id || order.id,
+      customId: order.id,
+      invoiceId: order.orderNumber || order.orderId || order.id,
+      returnUrl: getPayPalReturnUrl(request, order.id, "success"),
+      cancelUrl: getPayPalReturnUrl(request, order.id, "cancelled"),
+    });
+
+    if (!paypalOrder.id || !paypalOrder.approvalUrl) {
+      throw new Error("PayPal did not return an approval URL.");
+    }
+
+    const updatedPayment = await updateSupabasePayment(
+      payment.id,
+      {
+        paymentMethod: "PayPal",
+        paymentProvider: "paypal",
+        paypalOrderId: paypalOrder.id,
+      },
+      {
+        createdBy: "system",
+      }
+    );
+
+    sendJson(response, 201, {
+      ok: true,
+      order,
+      payment: updatedPayment,
+      paypalOrderId: paypalOrder.id,
+      approval_url: paypalOrder.approvalUrl,
+      approvalUrl: paypalOrder.approvalUrl,
+    });
+  } catch (error) {
+    console.error("[paypal] create order failed:", error);
+    sendJson(response, error?.status || 400, {
+      error: error?.message || "Unable to create PayPal checkout order.",
+    });
+  }
+
+  return true;
+};
+
+const handlePayPalCapture = async (request, response) => {
+  try {
+    const body = await readJsonBody(request);
+    const orderId = String(body?.orderId || "").trim();
+    const paypalOrderId = String(body?.paypalOrderId || body?.token || "").trim();
+
+    if (!orderId || !paypalOrderId) {
+      throw new Error("Order id and PayPal order id are required.");
+    }
+
+    const order = await getSupabaseOrderById(orderId);
+    if (!order?.id) {
+      sendJson(response, 404, { error: "Order not found." });
+      return true;
+    }
+
+    let payment = await getSupabasePaymentByPayPalOrderId(paypalOrderId);
+    if (!payment?.id) {
+      const paymentPayload = await ensureRetailPayPalPayment(order);
+      payment = paymentPayload.payment;
+      if (payment?.id && String(payment.paypalOrderId || "").trim() !== paypalOrderId) {
+        payment = await updateSupabasePayment(
+          payment.id,
+          {
+            paymentMethod: "PayPal",
+            paymentProvider: "paypal",
+            paypalOrderId,
+          },
+          {
+            createdBy: "system",
+          }
+        );
+      }
+    }
+
+    if (isPaidStatus(payment?.status)) {
+      sendJson(response, 200, {
+        ok: true,
+        order,
+        payment,
+        alreadyPaid: true,
+      });
+      return true;
+    }
+
+    const capture = await capturePayPalOrder(paypalOrderId);
+    if (String(capture.captureStatus || capture.status || "").trim().toUpperCase() !== "COMPLETED") {
+      throw new Error(`PayPal capture returned ${capture.captureStatus || capture.status || "an unknown status"}.`);
+    }
+
+    const finalized = await finalizePayPalPaymentSuccess({
+      order,
+      payment,
+      paypalOrderId,
+      paypalCaptureId: capture.captureId,
+      paidAt: capture.paidAt,
+      source: "system",
+    });
+
+    sendJson(response, 200, {
+      ok: true,
+      order: finalized.order,
+      payment: finalized.payment,
+      alreadyPaid: finalized.alreadyPaid,
+    });
+  } catch (error) {
+    console.error("[paypal] capture failed:", error);
+    sendJson(response, error?.status || 400, {
+      error: error?.message || "Unable to capture the PayPal payment.",
+    });
+  }
+
+  return true;
+};
+
+const handlePayPalWebhook = async (request, response) => {
+  try {
+    const body = await readJsonBody(request);
+    const verified = await verifyPayPalWebhookSignature({
+      headers: {
+        authAlgo: request.headers["paypal-auth-algo"],
+        certUrl: request.headers["paypal-cert-url"],
+        transmissionId: request.headers["paypal-transmission-id"],
+        transmissionSig: request.headers["paypal-transmission-sig"],
+        transmissionTime: request.headers["paypal-transmission-time"],
+      },
+      eventBody: body,
+    });
+
+    if (!verified) {
+      sendJson(response, 400, {
+        error: "PayPal webhook verification failed.",
+      });
+      return true;
+    }
+
+    const eventType = String(body?.event_type || "").trim().toUpperCase();
+    if (eventType !== "PAYMENT.CAPTURE.COMPLETED") {
+      sendJson(response, 200, {
+        ok: true,
+        ignored: true,
+      });
+      return true;
+    }
+
+    const resource = body?.resource && typeof body.resource === "object" ? body.resource : {};
+    const paypalCaptureId = String(resource?.id || "").trim();
+    const relatedIds = resource?.supplementary_data?.related_ids && typeof resource.supplementary_data.related_ids === "object"
+      ? resource.supplementary_data.related_ids
+      : {};
+    const paypalOrderId = String(relatedIds?.order_id || "").trim();
+
+    let payment = null;
+    if (paypalCaptureId) {
+      payment = await getSupabasePaymentByPayPalCaptureId(paypalCaptureId);
+    }
+    if (!payment?.id && paypalOrderId) {
+      payment = await getSupabasePaymentByPayPalOrderId(paypalOrderId);
+    }
+
+    if (!payment?.id) {
+      sendJson(response, 404, {
+        error: "Matching payment record not found.",
+      });
+      return true;
+    }
+
+    const order = await getSupabaseOrderById(payment.orderId);
+    if (!order?.id) {
+      sendJson(response, 404, {
+        error: "Matching order not found.",
+      });
+      return true;
+    }
+
+    const finalized = await finalizePayPalPaymentSuccess({
+      order,
+      payment,
+      paypalOrderId: paypalOrderId || payment.paypalOrderId,
+      paypalCaptureId,
+      paidAt: String(resource?.create_time || resource?.update_time || "").trim(),
+      source: "paypal_webhook",
+    });
+
+    sendJson(response, 200, {
+      ok: true,
+      order: finalized.order,
+      payment: finalized.payment,
+      alreadyPaid: finalized.alreadyPaid,
+    });
+  } catch (error) {
+    console.error("[paypal] webhook failed:", error);
+    sendJson(response, error?.status || 400, {
+      error: error?.message || "Unable to process PayPal webhook.",
     });
   }
 
@@ -2537,6 +2904,18 @@ const handleAdminApi = async (request, response, requestUrl) => {
 
   if (requestUrl.pathname === "/api/payments" && request.method === "GET") {
     return sendPaymentList(request, response);
+  }
+
+  if (requestUrl.pathname === "/api/paypal/create-order" && request.method === "POST") {
+    return handlePayPalOrderCreate(request, response);
+  }
+
+  if (requestUrl.pathname === "/api/paypal/capture-order" && request.method === "POST") {
+    return handlePayPalCapture(request, response);
+  }
+
+  if (requestUrl.pathname === "/api/paypal/webhook" && request.method === "POST") {
+    return handlePayPalWebhook(request, response);
   }
 
   if (requestUrl.pathname.startsWith("/api/orders/by-number/") && request.method === "GET") {

@@ -726,6 +726,16 @@ const formatPaymentStatusLabel = (status) =>
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ") || "Pending";
+const formatPaymentProviderLabel = (provider, method = "") => {
+  const normalized = String(provider || "").trim().toLowerCase();
+  if (!normalized) {
+    return String(method || "").trim() || "-";
+  }
+  if (normalized === "paypal") {
+    return "PayPal";
+  }
+  return normalized.replace(/\b\w/g, (part) => part.toUpperCase());
+};
 const STATUS_LABEL_CONFIG = {
   unprocessed: "Unprocessed",
   processed: "Processed",
@@ -765,7 +775,7 @@ const formatProductStatusLabel = (value) => {
   return formatStatusLabel(normalized);
 };
 const INTERNAL_ORDER_STATUSES = ["unprocessed", "processed"];
-const RETAIL_ORDER_STATUSES = ["pending_payment", "processing", "shipped", "delivered", "completed", "cancelled"];
+const RETAIL_ORDER_STATUSES = ["pending_payment", "paid", "processing", "shipped", "delivered", "completed", "cancelled"];
 const WHOLESALE_ORDER_STATUSES = [
   "inquiry_received",
   "quote_pending",
@@ -3173,10 +3183,15 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
             <article class="admin-info-card">
               <h5>Payment Overview</h5>
               <dl class="admin-description-grid">
+                <div><dt>Payment Provider</dt><dd>${escapeHtml(
+                  formatPaymentProviderLabel(primaryPayment?.paymentProvider, primaryPayment?.paymentMethod)
+                )}</dd></div>
                 <div><dt>Payment Method</dt><dd>${escapeHtml(primaryPayment?.paymentMethod || "-")}</dd></div>
                 <div><dt>Transaction ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(
-                  primaryPayment?.providerReference || primaryPayment?.paymentId || primaryPayment?.id || "-"
+                  primaryPayment?.transactionId || primaryPayment?.paypalCaptureId || primaryPayment?.providerReference || primaryPayment?.paymentId || primaryPayment?.id || "-"
                 )}</dd></div>
+                <div><dt>PayPal Order ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(primaryPayment?.paypalOrderId || "-")}</dd></div>
+                <div><dt>Payment Time</dt><dd>${escapeHtml(primaryPayment?.paidAt ? formatDate(primaryPayment.paidAt) : "-")}</dd></div>
                 <div><dt>Amount</dt><dd>${escapeHtml(
                   primaryPayment ? formatMoney(primaryPayment.amount, primaryPayment.currency) : selected.totalAmount || selected.subtotal || "-"
                 )}</dd></div>
@@ -3742,6 +3757,10 @@ const renderPaymentDetailMarkup = ({ payment, order, compact }) => {
                 <dd>${escapeHtml(payment.paidAt ? formatDate(payment.paidAt) : "-")}</dd>
               </div>
               <div>
+                <dt>Payment Provider</dt>
+                <dd>${escapeHtml(formatPaymentProviderLabel(payment.paymentProvider, payment.paymentMethod))}</dd>
+              </div>
+              <div>
                 <dt>Payment Method</dt>
                 <dd>${escapeHtml(payment.paymentMethod || "-")}</dd>
               </div>
@@ -3751,7 +3770,13 @@ const renderPaymentDetailMarkup = ({ payment, order, compact }) => {
               </div>
               <div>
                 <dt>External Transaction ID</dt>
-                <dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.providerReference || "-")}</dd>
+                <dd class="admin-break-anywhere admin-mono">${escapeHtml(
+                  payment.transactionId || payment.paypalCaptureId || payment.providerReference || "-"
+                )}</dd>
+              </div>
+              <div>
+                <dt>PayPal Order ID</dt>
+                <dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.paypalOrderId || "-")}</dd>
               </div>
               <div>
                 <dt>Failure Reason</dt>

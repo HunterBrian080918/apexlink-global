@@ -10,6 +10,8 @@ const quantityInput = document.querySelector("#quantity-input");
 const quantityNote = document.querySelector("#checkout-quantity-note");
 const checkoutForm = document.querySelector("#checkout-form");
 const checkoutStatus = document.querySelector(".checkout-status");
+const checkoutActionButton = document.querySelector("#checkout-action-button");
+const checkoutNextStepNote = document.querySelector("#checkout-next-step-note");
 const routes = window.ApexLinkRoutes || {
   products: "/products",
   payment: "/payment",
@@ -20,6 +22,15 @@ let currentPurchaseMode = "retail";
 let currentMinimumQuantity = 1;
 let quantityValidationTimer;
 let isSubmittingOrder = false;
+
+const setCheckoutActionState = (label = "", disabled = false) => {
+  if (checkoutActionButton) {
+    checkoutActionButton.disabled = disabled;
+    if (label) {
+      checkoutActionButton.textContent = label;
+    }
+  }
+};
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -280,6 +291,21 @@ const renderTotals = () => {
   renderProductSummary(currentProduct);
 };
 
+const syncCheckoutModeUi = () => {
+  if (currentPurchaseMode === "retail") {
+    setCheckoutActionState(isSubmittingOrder ? "Preparing PayPal..." : "Pay with PayPal", isSubmittingOrder);
+    if (checkoutNextStepNote) {
+      checkoutNextStepNote.textContent = "Your retail order will be created first, then you will be redirected to PayPal Checkout.";
+    }
+    return;
+  }
+
+  setCheckoutActionState(isSubmittingOrder ? "Creating order..." : "Continue to Payment", isSubmittingOrder);
+  if (checkoutNextStepNote) {
+    checkoutNextStepNote.textContent = "Your order details will be reviewed on the next step before any payment method is selected.";
+  }
+};
+
 const enforceMinimumQuantity = (shouldNotify) => {
   if (!quantityInput) {
     return currentMinimumQuantity;
@@ -351,17 +377,19 @@ const setupCheckoutForm = () => {
       return;
     }
 
-    const submitButton = checkoutForm.querySelector('button[type="submit"]');
-    const originalButtonLabel = submitButton?.textContent || "Continue to Payment";
+    const originalButtonLabel =
+      currentPurchaseMode === "retail" ? "Pay with PayPal" : "Continue to Payment";
+    let createdOrderId = "";
 
     try {
       isSubmittingOrder = true;
-      if (submitButton) {
-        submitButton.disabled = true;
-        submitButton.textContent = "Creating order...";
-      }
+      setCheckoutActionState(
+        currentPurchaseMode === "retail" ? "Preparing PayPal..." : "Creating order...",
+        true
+      );
       if (checkoutStatus) {
-        checkoutStatus.textContent = "Creating order...";
+        checkoutStatus.textContent =
+          currentPurchaseMode === "retail" ? "Creating order and preparing PayPal..." : "Creating order...";
       }
 
       const quantity = enforceMinimumQuantity(true);
@@ -388,26 +416,46 @@ const setupCheckoutForm = () => {
         }),
       });
       const createdOrder = payload?.order;
+      createdOrderId = String(createdOrder?.id || "").trim();
 
-      if (!createdOrder?.id) {
+      if (!createdOrderId) {
         throw new Error("Order was not created.");
+      }
+
+      if (currentPurchaseMode === "retail") {
+        const paypalPayload = await requestJson("/api/paypal/create-order", {
+          method: "POST",
+          body: JSON.stringify({
+            orderId: createdOrderId,
+          }),
+        });
+
+        if (!paypalPayload?.approvalUrl) {
+          throw new Error("PayPal approval URL was not returned.");
+        }
+
+        if (checkoutStatus) {
+          checkoutStatus.textContent = "Redirecting to PayPal...";
+        }
+
+        window.location.href = String(paypalPayload.approvalUrl || "");
+        return;
       }
 
       if (checkoutStatus) {
         checkoutStatus.textContent = "Redirecting to payment...";
       }
 
-      window.location.href = `${routes.payment || "/payment"}?orderId=${encodeURIComponent(createdOrder.id)}`;
+      window.location.href = `${routes.payment || "/payment"}?orderId=${encodeURIComponent(createdOrderId)}`;
     } catch (error) {
       console.error("Checkout order creation failed:", error);
       if (checkoutStatus) {
-        checkoutStatus.textContent = `Unable to create the order: ${error?.message || "Unknown error."}`;
-      }
-      if (submitButton) {
-        submitButton.disabled = false;
-        submitButton.textContent = originalButtonLabel;
+        checkoutStatus.textContent = createdOrderId && currentPurchaseMode === "retail"
+          ? `Order created, but PayPal could not be started: ${error?.message || "Unknown error."}`
+          : `Unable to create the order: ${error?.message || "Unknown error."}`;
       }
       isSubmittingOrder = false;
+      setCheckoutActionState(originalButtonLabel, false);
     }
   });
 };
@@ -461,6 +509,7 @@ const initCheckoutPage = async () => {
   }
 
   renderTotals();
+  syncCheckoutModeUi();
 };
 
 setupNavigation();

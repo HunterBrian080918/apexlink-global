@@ -90,6 +90,7 @@ const toStatusLabel = (value, fallback = "-") =>
 
 const RETAIL_ORDER_STATUSES = new Set([
   "pending_payment",
+  "paid",
   "processing",
   "shipped",
   "delivered",
@@ -465,6 +466,7 @@ const getOrderStatusEventPayload = (status) => {
   const normalized = String(status || "").trim().toLowerCase();
   const lookup = {
     inquiry_received: ["order_status_changed", "Inquiry received", "Order was marked as inquiry received."],
+    paid: ["payment_marked_paid", "Order paid", "Order payment was completed successfully."],
     quote_pending: ["quote_created", "Quote pending", "Order moved to quote pending."],
     awaiting_confirmation: ["customer_confirmed", "Awaiting confirmation", "Order is awaiting customer confirmation."],
     awaiting_deposit: ["deposit_requested", "Awaiting deposit", "Deposit was requested for this order."],
@@ -761,7 +763,7 @@ const createOrder = async (input) => {
       ? `${wholesaleMoq} units`
       : "1 unit";
   const desiredOrderStatus = purchaseMode === "wholesale" ? "inquiry_received" : "pending_payment";
-  const desiredPaymentStatus = "pending";
+  const desiredPaymentStatus = "unpaid";
   const orderDateKey = currentDateStamp();
   const baseOrderRow = {
     source: "website",
