@@ -424,7 +424,6 @@ const initPaymentPage = async () => {
   }
 
   await store.ready;
-  await store.trackVisit();
   const [website, settings] = await Promise.all([store.getWebsiteSettings(), store.getSettings()]);
   currentSiteSettings = settings;
   const params = new URLSearchParams(window.location.search);

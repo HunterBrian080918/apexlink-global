@@ -905,7 +905,6 @@ const initPage = async () => {
   if (window.NorthstarStore?.ready) {
     try {
       await window.NorthstarStore.ready;
-      await window.NorthstarStore.trackVisit();
     } catch (error) {
       console.warn("[support] analytics tracking failed:", error);
     }

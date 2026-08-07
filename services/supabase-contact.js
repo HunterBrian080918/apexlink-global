@@ -130,7 +130,28 @@ const createContactInquiry = async (input = {}) => {
   };
 };
 
+const mapContactMessageRow = (row) => ({
+  id: String(row?.id || ""),
+  customerId: String(row?.customer_id || "").trim(),
+  source: String(row?.source || "contact").trim(),
+  status: String(row?.status || "unprocessed").trim(),
+  customerName: String(row?.customer_name || "").trim(),
+  email: String(row?.email || "").trim(),
+  phone: String(row?.phone || "").trim(),
+  country: String(row?.country || "").trim(),
+  productInterest: String(row?.product_interest || "").trim(),
+  message: String(row?.message || "").trim(),
+  createdAt: String(row?.created_at || "").trim(),
+  updatedAt: String(row?.updated_at || "").trim(),
+});
+
+const listContactMessages = async () => {
+  const rows = await requestSupabase("contact_messages?select=*&order=created_at.desc");
+  return Array.isArray(rows) ? rows.map(mapContactMessageRow) : [];
+};
+
 module.exports = {
   createContactInquiry,
+  listContactMessages,
   validateContactPayload,
 };

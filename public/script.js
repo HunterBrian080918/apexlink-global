@@ -93,7 +93,6 @@ const initPage = async () => {
   }
 
   await store.ready;
-  await store.trackVisit();
   const homepagePromise = typeof store.getHomepage === "function" ? store.getHomepage() : Promise.resolve(null);
   const websitePromise =
     typeof store.getWebsiteSettings === "function" ? store.getWebsiteSettings() : Promise.resolve(null);

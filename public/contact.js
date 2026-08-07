@@ -325,7 +325,6 @@ const initPage = async () => {
   }
 
   await window.NorthstarStore.ready;
-  await window.NorthstarStore.trackVisit();
 };
 
 setupNavigation();

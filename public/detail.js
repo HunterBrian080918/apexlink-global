@@ -499,7 +499,6 @@ const initPage = async () => {
   }
 
   await store.ready;
-  await store.trackVisit();
   const [website] = await Promise.all([store.getWebsiteSettings()]);
   const params = new URLSearchParams(window.location.search);
   const id = params.get("id");

@@ -113,6 +113,9 @@ const normalizePaymentStatus = (value) => {
   return normalized;
 };
 
+const isRevenueStatus = (value) =>
+  new Set(["paid", "deposit_paid", "partially_paid"]).has(normalizePaymentStatus(value || "pending"));
+
 const mapPaymentRow = (row) => ({
   id: String(row?.id || ""),
   paymentId: String(row?.payment_id || row?.id || "").trim(),
@@ -438,4 +441,5 @@ module.exports = {
   listPaymentsByOrder,
   createPaymentForOrder,
   updatePayment,
+  isRevenueStatus,
 };

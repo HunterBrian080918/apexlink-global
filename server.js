@@ -86,6 +86,8 @@ const {
   getEmailConfigurationStatus,
 } = require("./services/email-notifications");
 const { createContactInquiry, validateContactPayload } = require("./services/supabase-contact");
+const { recordVisit: recordSupabaseVisit } = require("./services/supabase-analytics");
+const { buildDashboard: buildSupabaseDashboard } = require("./services/supabase-dashboard");
 
 const root = __dirname;
 const publicRoot = path.join(root, "public");
@@ -814,6 +816,72 @@ const isLocalCookieHost = (hostname) => {
 };
 
 const shouldUseSecureAdminCookie = (request) => isProduction && !isLocalCookieHost(parseRequestHostname(request));
+
+const isPrivateNetworkHostname = (hostname) => isLocalCookieHost(hostname);
+
+const normalizeVisitorPath = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized.startsWith("/")) {
+    return "/";
+  }
+  return normalized.slice(0, 320);
+};
+
+const inferDeviceType = (userAgent) => {
+  const normalized = String(userAgent || "").toLowerCase();
+  if (/ipad|tablet|kindle|playbook|silk/i.test(normalized)) {
+    return "tablet";
+  }
+  if (/mobile|iphone|android|ipod|blackberry|opera mini|iemobile/i.test(normalized)) {
+    return "mobile";
+  }
+  return "desktop";
+};
+
+const inferTrafficSource = (pathValue, referrerValue) => {
+  const pathText = String(pathValue || "").trim();
+  const referrer = String(referrerValue || "").trim().toLowerCase();
+  try {
+    const url = pathText.startsWith("http") ? new URL(pathText) : new URL(`https://placeholder.test${pathText || "/"}`);
+    const utmSource = String(url.searchParams.get("utm_source") || "").trim().toLowerCase();
+    if (utmSource) {
+      return utmSource;
+    }
+  } catch (error) {
+    // Ignore malformed URLs and fall back to referrer parsing.
+  }
+
+  if (!referrer) {
+    return "direct";
+  }
+  if (referrer.includes("google.")) return "google";
+  if (referrer.includes("bing.")) return "bing";
+  if (referrer.includes("tiktok.")) return "tiktok";
+  if (referrer.includes("facebook.") || referrer.includes("fb.")) return "facebook";
+  if (referrer.includes("instagram.")) return "instagram";
+  if (referrer.includes("linkedin.")) return "linkedin";
+  if (referrer.includes("twitter.") || referrer.includes("x.com")) return "x";
+  if (referrer.includes("youtube.")) return "youtube";
+  return "referral";
+};
+
+const getRequestCountry = (request) =>
+  String(
+    request.headers["cf-ipcountry"] ||
+      request.headers["x-vercel-ip-country"] ||
+      request.headers["x-country-code"] ||
+      ""
+  )
+    .trim()
+    .toUpperCase();
+
+const getRequestIpAddress = (request) => {
+  const forwarded = String(request.headers["x-forwarded-for"] || "").trim();
+  if (forwarded) {
+    return forwarded.split(",")[0].trim();
+  }
+  return String(request.socket?.remoteAddress || "").trim();
+};
 
 const serializeCookie = (name, value, options = {}) => {
   const parts = [`${name}=${encodeURIComponent(value)}`];
@@ -2160,7 +2228,92 @@ const sendAdminSystemValidation = async (request, response) => {
   return true;
 };
 
+const sendAdminDashboard = async (request, response) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) {
+    return true;
+  }
+
+  try {
+    const dashboard = await buildSupabaseDashboard();
+    sendJson(response, 200, {
+      ok: true,
+      dashboard,
+    });
+  } catch (error) {
+    console.error("[dashboard] load failed:", error);
+    sendJson(response, error?.status || 500, {
+      error: error?.message || "Unable to load dashboard data.",
+    });
+  }
+
+  return true;
+};
+
+const handleVisitAnalytics = async (request, response) => {
+  try {
+    const hostname = parseRequestHostname(request);
+    if (isPrivateNetworkHostname(hostname)) {
+      sendJson(response, 202, { ok: true, ignored: true, reason: "private_host" });
+      return true;
+    }
+
+    const body = await readJsonBody(request).catch(() => ({}));
+    const payload = body?.visit && typeof body.visit === "object" ? body.visit : body;
+    const pathValue = normalizeVisitorPath(payload?.path || "/");
+    if (pathValue.startsWith("/admin") || pathValue.startsWith("/api")) {
+      sendJson(response, 202, { ok: true, ignored: true, reason: "non_public_path" });
+      return true;
+    }
+
+    const sessionSecret = getAdminSessionSecret();
+    if (sessionSecret) {
+      try {
+        const session = await getAuthenticatedAdminSession(request, sessionSecret);
+        if (session?.session?.authenticated) {
+          sendJson(response, 202, { ok: true, ignored: true, reason: "admin_session" });
+          return true;
+        }
+      } catch (error) {
+        console.warn("[analytics] admin-session check failed:", error?.message || error);
+      }
+    }
+
+    const referrer = String(payload?.referrer || request.headers.referer || "").trim();
+    const userAgent = String(payload?.userAgent || request.headers["user-agent"] || "").trim();
+    const event = await recordSupabaseVisit({
+      path: pathValue,
+      referrer,
+      userAgent,
+      deviceType: payload?.deviceType || inferDeviceType(userAgent),
+      visitorId: payload?.visitorId,
+      pageViewId: payload?.pageViewId,
+      source: inferTrafficSource(payload?.url || pathValue, referrer),
+      country: getRequestCountry(request),
+      timestamp: payload?.timestamp,
+      ipAddress: getRequestIpAddress(request),
+      hostname,
+    });
+
+    sendJson(response, 201, {
+      ok: true,
+      eventId: event.id,
+    });
+  } catch (error) {
+    console.error("[analytics] visit tracking failed:", error);
+    sendJson(response, error?.status || 400, {
+      error: error?.message || "Unable to record visit analytics.",
+    });
+  }
+
+  return true;
+};
+
 const handleAdminApi = async (request, response, requestUrl) => {
+  if (requestUrl.pathname === "/api/analytics/visit" && request.method === "POST") {
+    return handleVisitAnalytics(request, response);
+  }
+
   if (requestUrl.pathname === "/api/contact" && request.method === "POST") {
     return handleContactCreate(request, response);
   }
@@ -2222,6 +2375,10 @@ const handleAdminApi = async (request, response, requestUrl) => {
 
   if (requestUrl.pathname === "/api/admin/system/validation" && request.method === "GET") {
     return sendAdminSystemValidation(request, response);
+  }
+
+  if (requestUrl.pathname === "/api/admin/dashboard" && request.method === "GET") {
+    return sendAdminDashboard(request, response);
   }
 
   if (requestUrl.pathname === "/api/admin/support/stream" && request.method === "GET") {

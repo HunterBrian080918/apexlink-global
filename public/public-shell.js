@@ -1,4 +1,7 @@
 (function () {
+  const VISITOR_ID_KEY = "avelixlink-visitor-id";
+  const VISIT_WINDOW_KEY = "avelixlink-visit-window-v1";
+  const VISIT_COOLDOWN_MS = 15 * 60 * 1000;
   const ROUTES = {
     home: "/",
     about: "/about",
@@ -176,6 +179,135 @@
     });
   }
 
+  const getStorage = () => {
+    try {
+      return window.localStorage;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const getVisitorId = () => {
+    const storage = getStorage();
+    const existing = storage?.getItem(VISITOR_ID_KEY);
+    if (existing) {
+      return existing;
+    }
+
+    const generated =
+      typeof window.crypto?.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : `visitor-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    storage?.setItem(VISITOR_ID_KEY, generated);
+    return generated;
+  };
+
+  const readVisitWindow = () => {
+    const storage = getStorage();
+    if (!storage) {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(storage.getItem(VISIT_WINDOW_KEY) || "null");
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (error) {
+      return null;
+    }
+  };
+
+  const writeVisitWindow = (value) => {
+    const storage = getStorage();
+    if (!storage) {
+      return;
+    }
+    storage.setItem(VISIT_WINDOW_KEY, JSON.stringify(value));
+  };
+
+  const getDeviceType = () => {
+    const userAgent = String(window.navigator.userAgent || "").toLowerCase();
+    if (/ipad|tablet|kindle|playbook|silk/i.test(userAgent)) {
+      return "tablet";
+    }
+    if (/mobile|iphone|android|ipod|blackberry|opera mini|iemobile/i.test(userAgent)) {
+      return "mobile";
+    }
+    return "desktop";
+  };
+
+  const shouldSkipVisitTrack = () => {
+    const lastWindow = readVisitWindow();
+    if (!lastWindow) {
+      return false;
+    }
+
+    return (
+      lastWindow.hostname === window.location.hostname &&
+      lastWindow.pathname === window.location.pathname &&
+      Date.now() - Number(lastWindow.trackedAt || 0) < VISIT_COOLDOWN_MS
+    );
+  };
+
+  const buildVisitPayload = () => ({
+    path: `${window.location.pathname}${window.location.search || ""}`,
+    url: window.location.href,
+    referrer: document.referrer || "",
+    userAgent: window.navigator.userAgent || "",
+    deviceType: getDeviceType(),
+    visitorId: getVisitorId(),
+    pageViewId:
+      typeof window.crypto?.randomUUID === "function"
+        ? window.crypto.randomUUID()
+        : `pv-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    timestamp: new Date().toISOString(),
+  });
+
+  const sendVisitPayload = (payload) => {
+    const body = JSON.stringify(payload);
+    const blob = new Blob([body], { type: "application/json" });
+
+    if (typeof navigator.sendBeacon === "function") {
+      try {
+        return navigator.sendBeacon("/api/analytics/visit", blob);
+      } catch (error) {
+        // Fall back to fetch below.
+      }
+    }
+
+    fetch("/api/analytics/visit", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "same-origin",
+      keepalive: true,
+      body,
+    }).catch(() => {});
+
+    return true;
+  };
+
+  const trackVisit = () => {
+    if (!isPublicPage || shouldSkipVisitTrack()) {
+      return false;
+    }
+
+    const payload = buildVisitPayload();
+    const sent = sendVisitPayload(payload);
+    if (sent) {
+      writeVisitWindow({
+        hostname: window.location.hostname,
+        pathname: window.location.pathname,
+        trackedAt: Date.now(),
+      });
+    }
+    return sent;
+  };
+
+  if (isPublicPage) {
+    window.setTimeout(trackVisit, 0);
+  }
+
   window.ApexLinkRoutes = {
     ...ROUTES,
     currentRoute,
@@ -186,5 +318,8 @@
     privacy: ROUTES.privacy,
     shippingPolicy: ROUTES.shippingPolicy,
     returnsRefunds: ROUTES.returnsRefunds,
+  };
+  window.AvelixAnalytics = {
+    trackVisit,
   };
 })();

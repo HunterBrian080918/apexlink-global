@@ -284,7 +284,6 @@ const initPage = async () => {
   }
 
   await store.ready;
-  await store.trackVisit();
   const [products, nextAiMatchConfig] = await Promise.all([store.getProducts(), store.getAIMatchConfig()]);
   allProducts = Array.isArray(products) ? products : [];
   aiMatchConfig = nextAiMatchConfig;

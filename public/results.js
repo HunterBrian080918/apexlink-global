@@ -234,7 +234,6 @@ const initResultsPage = async () => {
   }
 
   await store.ready;
-  await store.trackVisit();
   let parsedCriteria;
   const savedCriteria = window.sessionStorage.getItem(window.MatchEngine.storageKey);
 
