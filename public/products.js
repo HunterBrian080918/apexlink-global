@@ -144,7 +144,7 @@ const renderProducts = (products) => {
       )}">
             <img
               src="${escapeHtml(product.image)}"
-              alt="${escapeHtml(product.name)}"
+              alt="${escapeHtml(product.name)} ${escapeHtml(product.category || "workspace product")}"
               loading="lazy"
               decoding="async"
             >

@@ -93,6 +93,7 @@ const root = __dirname;
 const publicRoot = path.join(root, "public");
 const port = Number.parseInt(process.env.PORT || "8000", 10);
 const isProduction = String(process.env.NODE_ENV || "").trim().toLowerCase() === "production";
+const configuredPublicSiteUrl = String(process.env.PUBLIC_SITE_URL || process.env.SITE_URL || "").trim().replace(/\/+$/, "");
 const pidFile = path.join(root, ".server.pid");
 const defaultDataFile = path.join(root, "data", "default-data.json");
 const uploadLogFile = path.join(root, "logs", "media-upload.log");
@@ -104,6 +105,14 @@ const redirectMap = {
   "/ai-match": "/workspace-finder",
   "/ai-match.html": "/workspace-finder",
 };
+const sitemapStaticRoutes = [
+  { path: "/", changefreq: "weekly", priority: "1.0" },
+  { path: "/products", changefreq: "weekly", priority: "0.9" },
+  { path: "/about", changefreq: "monthly", priority: "0.7" },
+  { path: "/contact", changefreq: "monthly", priority: "0.7" },
+  { path: "/support", changefreq: "weekly", priority: "0.6" },
+];
+const sitemapPublishedProductStatuses = new Set(["active", "published"]);
 
 const runBackgroundTask = (label, task) => {
   Promise.resolve().then(task).catch((error) => console.error(`[${label}] ${error?.message || error}`));
@@ -418,6 +427,89 @@ const send = (response, statusCode, body, contentType = "text/plain; charset=utf
 
 const sendJson = (response, statusCode, payload, headers = {}) =>
   send(response, statusCode, JSON.stringify(payload), "application/json; charset=utf-8", headers);
+
+const escapeXml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+
+const formatSitemapDate = (value) => {
+  const date = value ? new Date(value) : new Date();
+  return Number.isNaN(date.getTime()) ? nowIso().slice(0, 10) : date.toISOString().slice(0, 10);
+};
+
+const getRequestOrigin = (request) => {
+  if (configuredPublicSiteUrl) {
+    return configuredPublicSiteUrl;
+  }
+
+  const host = String(request.headers.host || `127.0.0.1:${port}`).trim();
+  const forwardedProto = String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+  const isLocalHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
+  const protocol = forwardedProto || ((isProduction && !isLocalHost) ? "https" : "http");
+  return `${protocol}://${host}`;
+};
+
+const buildAbsolutePublicUrl = (request, pathname) => new URL(pathname, `${getRequestOrigin(request)}/`).toString();
+
+const isPublishedProductForSitemap = (product) =>
+  sitemapPublishedProductStatuses.has(String(product?.status || "").trim().toLowerCase());
+
+const getProductDetailPath = (product) => `/detail?id=${encodeURIComponent(String(product?.id || "").trim())}`;
+
+const buildSitemapXml = async (request) => {
+  const today = formatSitemapDate();
+  const staticEntries = sitemapStaticRoutes.map(
+    ({ path: routePath, changefreq, priority }) => `  <url>
+    <loc>${escapeXml(buildAbsolutePublicUrl(request, routePath))}</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>${changefreq}</changefreq>
+    <priority>${priority}</priority>
+  </url>`
+  );
+
+  const products = await listSupabaseProducts();
+  const productEntries = products
+    .filter((product) => isPublishedProductForSitemap(product) && String(product?.id || "").trim())
+    .map((product) => `  <url>
+    <loc>${escapeXml(buildAbsolutePublicUrl(request, getProductDetailPath(product)))}</loc>
+    <lastmod>${formatSitemapDate(product.updatedAt || product.createdAt)}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>`);
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${[...staticEntries, ...productEntries].join("\n")}
+</urlset>`;
+};
+
+const sendSitemapXml = async (request, response) => {
+  try {
+    const xml = await buildSitemapXml(request);
+    send(response, 200, xml, "application/xml; charset=utf-8");
+  } catch (error) {
+    console.error("[seo] sitemap generation failed:", error);
+    send(response, 500, "Unable to generate sitemap.xml");
+  }
+};
+
+const sendRobotsTxt = (request, response) => {
+  const body = `User-agent: *
+Allow: /
+
+Disallow: /admin
+Disallow: /api
+Disallow: /data
+Disallow: /scripts
+
+Sitemap: ${buildAbsolutePublicUrl(request, "/sitemap.xml")}
+`;
+  send(response, 200, body, "text/plain; charset=utf-8");
+};
 
 const reportStartupEnvWarnings = () => {
   for (const group of requiredEnvGroups) {
@@ -2845,6 +2937,16 @@ const server = http.createServer(async (request, response) => {
         service: "avelixlink",
         timestamp: nowIso(),
       });
+      return;
+    }
+
+    if (requestUrl.pathname === "/sitemap.xml" && request.method === "GET") {
+      await sendSitemapXml(request, response);
+      return;
+    }
+
+    if (requestUrl.pathname === "/robots.txt" && request.method === "GET") {
+      sendRobotsTxt(request, response);
       return;
     }
 

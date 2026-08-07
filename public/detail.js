@@ -20,6 +20,43 @@ const getCheckoutUrl = (productId, mode) => {
   return `${base}${separator}mode=${encodeURIComponent(mode)}`;
 };
 
+const upsertMeta = (name, content) => {
+  if (!content) {
+    return;
+  }
+  let node = document.querySelector(`meta[name="${name}"]`);
+  if (!node) {
+    node = document.createElement("meta");
+    node.setAttribute("name", name);
+    document.head.appendChild(node);
+  }
+  node.setAttribute("content", content);
+};
+
+const upsertCanonical = (href) => {
+  if (!href) {
+    return;
+  }
+  let node = document.querySelector('link[rel="canonical"]');
+  if (!node) {
+    node = document.createElement("link");
+    node.setAttribute("rel", "canonical");
+    document.head.appendChild(node);
+  }
+  node.setAttribute("href", href);
+};
+
+const upsertJsonLd = (id, payload) => {
+  let node = document.querySelector(`#${id}`);
+  if (!node) {
+    node = document.createElement("script");
+    node.type = "application/ld+json";
+    node.id = id;
+    document.head.appendChild(node);
+  }
+  node.textContent = JSON.stringify(payload);
+};
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -89,6 +126,80 @@ const getWholesalePriceTiers = (product) =>
     ? product.b2b.priceTiers.filter((tier) => Number(tier?.unitPrice || 0) > 0)
     : [];
 
+const getProductKeywordList = (product) => {
+  const values = [
+    ...(Array.isArray(product?.keywords) ? product.keywords : []),
+    ...(Array.isArray(product?.tags) ? product.tags : []),
+    ...(Array.isArray(product?.functions) ? product.functions : []),
+    product?.category || "",
+    product?.name || "",
+  ];
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+};
+
+const getProductSeoTitle = (product, brandName) => `${product.name} Supplier | ${brandName}`;
+
+const getProductSeoDescription = (product, brandName) => {
+  const category = String(product?.category || "workspace products").trim();
+  return `${brandName} provides ${product.name} and related ${category.toLowerCase()} for global buyers, wholesale sourcing, and OEM workspace supply.`;
+};
+
+const applyProductSeo = (product, brandName) => {
+  if (!product) {
+    return;
+  }
+
+  const canonicalUrl = `${window.location.origin}/detail?id=${encodeURIComponent(product.id)}`;
+  const keywordList = getProductKeywordList(product);
+  const seoTitle = String(product.seoTitle || "").trim() || getProductSeoTitle(product, brandName);
+  const seoDescription = String(product.metaDescription || "").trim() || getProductSeoDescription(product, brandName);
+  const wholesalePriceTiers = getWholesalePriceTiers(product);
+  const retailPriceValue = Number(product?.b2c?.retailPrice || 0);
+  const primaryImage = String(product.image || "").trim();
+  const offer =
+    retailPriceValue > 0
+      ? {
+          "@type": "Offer",
+          priceCurrency: "USD",
+          price: retailPriceValue.toFixed(2),
+          availability: "https://schema.org/InStock",
+          url: canonicalUrl,
+        }
+      : wholesalePriceTiers.length
+        ? {
+            "@type": "AggregateOffer",
+            priceCurrency: "USD",
+            lowPrice: Number(wholesalePriceTiers[wholesalePriceTiers.length - 1]?.unitPrice || wholesalePriceTiers[0]?.unitPrice || 0).toFixed(2),
+            highPrice: Number(wholesalePriceTiers[0]?.unitPrice || 0).toFixed(2),
+            offerCount: wholesalePriceTiers.length,
+            availability: "https://schema.org/InStock",
+            url: canonicalUrl,
+          }
+        : {
+            "@type": "Offer",
+            availability: "https://schema.org/OutOfStock",
+            url: canonicalUrl,
+          };
+
+  document.title = seoTitle;
+  upsertMeta("description", seoDescription);
+  upsertMeta("keywords", keywordList.join(", "));
+  upsertCanonical(canonicalUrl);
+  upsertJsonLd("product-schema", {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    name: product.name,
+    description: seoDescription,
+    image: primaryImage ? [primaryImage] : [],
+    brand: {
+      "@type": "Brand",
+      name: brandName,
+    },
+    category: product.category || undefined,
+    offers: offer,
+  });
+};
+
 const syncNavbarState = () => {
   if (!navbar) {
     return;
@@ -126,7 +237,7 @@ const renderDetail = (product, brandName) => {
     return;
   }
 
-  document.title = `${product.name} | ${brandName}`;
+  applyProductSeo(product, brandName);
   const retailEnabled = product.b2c?.enabled !== false;
   const wholesaleEnabled = product.b2b?.enabled !== false;
   const retailPrice = getRetailPriceLabel(product);
@@ -179,7 +290,7 @@ const renderDetail = (product, brandName) => {
     <section class="detail-hero-block">
       <div class="detail-hero-layout">
         <div class="detail-image-wrap reveal">
-          <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}">
+          <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)} ${escapeHtml(product.category || "workspace product")}">
         </div>
 
         <div class="detail-copy reveal">

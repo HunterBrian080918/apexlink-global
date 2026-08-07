@@ -42,6 +42,25 @@
     const normalized = String(value || "").trim();
     return !normalized || normalized === "Global" ? "" : normalized;
   };
+  const ensureMetaTag = (name) => {
+    let node = document.querySelector(`meta[name="${name}"]`);
+    if (!node) {
+      node = document.createElement("meta");
+      node.setAttribute("name", name);
+      document.head.appendChild(node);
+    }
+    return node;
+  };
+  const ensureJsonLdScript = (id) => {
+    let node = document.querySelector(`#${id}`);
+    if (!node) {
+      node = document.createElement("script");
+      node.type = "application/ld+json";
+      node.id = id;
+      document.head.appendChild(node);
+    }
+    return node;
+  };
 
   const getSiteConfig = async (options = {}) => {
     if (siteConfigCache && !options.force) {
@@ -90,6 +109,7 @@
       const brandName = normalizeBrandName(brand.name);
       const logoTop = normalizeBrandName(brand.logoTop, "AvelixLink");
       const logoBottom = normalizeBrandBottom(brand.logoBottom);
+      const isHomePage = document.body.classList.contains("page-home");
 
       document.querySelectorAll('link[rel~="icon"]').forEach((node) => {
         if (brand.favicon) {
@@ -97,13 +117,16 @@
         }
       });
 
-      const description = document.querySelector('meta[name="description"]');
-      if (description && seo.metaDescription) {
-        description.setAttribute("content", seo.metaDescription);
+      if (isHomePage && seo.metaDescription) {
+        ensureMetaTag("description").setAttribute("content", seo.metaDescription);
+      }
+
+      if (isHomePage && seo.metaKeywords) {
+        ensureMetaTag("keywords").setAttribute("content", seo.metaKeywords);
       }
 
       const currentTitle = document.title || "";
-      if (document.body.classList.contains("page-home")) {
+      if (isHomePage) {
         document.title = brand.browserTitle || currentTitle || brandName;
       } else if (currentTitle.includes("|")) {
         const parts = currentTitle.split("|").map((item) => item.trim());
@@ -187,6 +210,26 @@
           value.textContent = contact.email || "";
         }
       });
+
+      if (isHomePage) {
+        const organizationSchema = {
+          "@context": "https://schema.org",
+          "@type": "Organization",
+          name: brandName,
+          url: `${window.location.origin}/`,
+          logo: normalizeLogoSrc(brand.logoImage),
+          contactPoint: contact.email
+            ? [
+                {
+                  "@type": "ContactPoint",
+                  contactType: "customer support",
+                  email: contact.email,
+                },
+              ]
+            : undefined,
+        };
+        ensureJsonLdScript("organization-schema").textContent = JSON.stringify(organizationSchema);
+      }
 
       return config;
     } catch (error) {
