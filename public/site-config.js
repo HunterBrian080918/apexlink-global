@@ -14,8 +14,6 @@
     }
 
     if (
-      normalized === "assets/brand/apexlink-mark.png" ||
-      normalized === "/assets/brand/apexlink-mark.png" ||
       normalized === "assets/brand/avelixlink-mark.png" ||
       normalized === "/assets/brand/avelixlink-mark.png"
     ) {

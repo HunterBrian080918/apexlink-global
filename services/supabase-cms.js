@@ -169,11 +169,11 @@ const normalizeLogoImage = (value, fallback = LOGO_FALLBACK_PATH) => {
     return fallback;
   }
 
-  if (normalized === "assets/brand/apexlink-mark.png" || normalized === "assets/brand/avelixlink-mark.png") {
+  if (normalized === "assets/brand/avelixlink-mark.png") {
     return LOGO_FALLBACK_PATH;
   }
 
-  if (normalized === "/assets/brand/apexlink-mark.png" || normalized === "/assets/brand/avelixlink-mark.png") {
+  if (normalized === "/assets/brand/avelixlink-mark.png") {
     return LOGO_FALLBACK_PATH;
   }
 
@@ -196,8 +196,6 @@ const normalizeFaviconImage = (value, fallback = FAVICON_FALLBACK_PATH) => {
 
   if (
     !normalized ||
-    normalized === "assets/brand/apexlink-favicon.png" ||
-    normalized === "/assets/brand/apexlink-favicon.png" ||
     normalized === "assets/brand/avelixlink-favicon.png" ||
     normalized === "/assets/brand/avelixlink-favicon.png"
   ) {
