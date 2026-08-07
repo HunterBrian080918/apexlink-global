@@ -60,10 +60,23 @@ const logEmailConfigurationWarning = () => {
   return status;
 };
 
+const buildEmailLogContext = (kind, input = {}) =>
+  JSON.stringify({
+    kind: String(kind || "support").trim().toLowerCase(),
+    to: targetEmail,
+    customerName: String(input.customerName || "").trim() || null,
+    customerEmail: String(input.email || "").trim() || null,
+    adminUrl: String(input.adminUrl || adminUrl).trim() || null,
+  });
+
 const sendAdminSubmissionEmail = async (kind, input = {}) => {
+  console.info(`[email] preparing notification email ${buildEmailLogContext(kind, input)}`);
   const transport = getTransport();
   if (!transport) {
     const status = logEmailConfigurationWarning();
+    console.error(
+      `[email] failed: ${buildEmailLogContext(kind, input)} reason=not_configured missing=${status.missingVariables.join(",")}`
+    );
     return { sent: false, reason: "not_configured", missingVariables: status.missingVariables };
   }
   const fields = [
@@ -73,9 +86,24 @@ const sendAdminSubmissionEmail = async (kind, input = {}) => {
   ];
   const text = fields.map(([label, value]) => `${label}: ${String(value || "-")}`).join("\n");
   const html = `<div style="font-family:Arial,sans-serif;color:#182230"><h2>${escapeHtml(subjects[kind] || subjects.support)}</h2><table>${fields.map(([label, value]) => `<tr><td style="padding:6px 18px 6px 0;font-weight:700;vertical-align:top">${escapeHtml(label)}</td><td style="padding:6px 0">${escapeHtml(value || "-")}</td></tr>`).join("")}</table></div>`;
-  const info = await transport.sendMail({ from: smtpFrom, to: targetEmail, subject: subjects[kind] || subjects.support, text, html });
-  console.info(`[email] ${subjects[kind] || subjects.support} sent: ${info.messageId}`);
-  return { sent: true, messageId: info.messageId };
+  try {
+    const info = await transport.sendMail({
+      from: smtpFrom,
+      to: targetEmail,
+      subject: subjects[kind] || subjects.support,
+      text,
+      html,
+    });
+    console.info(
+      `[email] sent successfully ${buildEmailLogContext(kind, input)} messageId=${String(info.messageId || "").trim()}`
+    );
+    return { sent: true, messageId: info.messageId };
+  } catch (error) {
+    console.error(
+      `[email] failed: ${buildEmailLogContext(kind, input)} reason=${error?.message || "unknown_error"}`
+    );
+    throw error;
+  }
 };
 
 const verifyEmailTransport = async () => {
