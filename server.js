@@ -383,7 +383,14 @@ const buildContentSecurityPolicy = () => {
   const styleSrc = new Set(["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"]);
   const fontSrc = new Set(["'self'", "data:", "https://fonts.gstatic.com"]);
   const frameAncestors = new Set(["'self'"]);
-  const formAction = new Set(["'self'", "mailto:", "https://wa.me", "https://api.whatsapp.com"]);
+  const formAction = new Set([
+    "'self'",
+    "mailto:",
+    "https://wa.me",
+    "https://api.whatsapp.com",
+    "https://www.paypal.com",
+    "https://www.sandbox.paypal.com",
+  ]);
 
   const supabaseOrigin = parseOrigin(process.env.SUPABASE_URL);
   const renderOrigin = parseOrigin(process.env.RENDER_EXTERNAL_URL);
