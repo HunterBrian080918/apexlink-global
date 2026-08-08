@@ -95,8 +95,21 @@ const paypalRequest = async (pathname, options = {}) => {
 
 const formatAmount = (value) => Number(Number(value || 0).toFixed(2)).toFixed(2);
 
-const findPayPalLink = (payload, rel) =>
-  String((Array.isArray(payload?.links) ? payload.links : []).find((item) => String(item?.rel || "").toLowerCase() === rel)?.href || "").trim();
+const findPayPalLink = (payload, rels) => {
+  const links = Array.isArray(payload?.links) ? payload.links : [];
+  const relationOrder = Array.isArray(rels) ? rels : [rels];
+
+  for (const rel of relationOrder) {
+    const href = String(
+      links.find((item) => String(item?.rel || "").trim().toLowerCase() === String(rel || "").trim().toLowerCase())?.href || ""
+    ).trim();
+    if (href) {
+      return href;
+    }
+  }
+
+  return "";
+};
 
 const createOrder = async (input) => {
   const amount = formatAmount(input?.amount || 0);
@@ -139,7 +152,7 @@ const createOrder = async (input) => {
   return {
     id: String(payload?.id || "").trim(),
     status: String(payload?.status || "").trim(),
-    approvalUrl: findPayPalLink(payload, "approve"),
+    approvalUrl: findPayPalLink(payload, ["approve", "payer-action"]),
     raw: payload,
   };
 };
