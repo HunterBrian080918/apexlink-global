@@ -50,6 +50,7 @@ const adminState = {
     query: "",
     status: "all",
     conversationType: "all",
+    mobileView: "list",
   },
   products: {
     mode: "list",
@@ -632,14 +633,25 @@ const createAdminConversationRowMarkup = (thread, selectedId) => `
     class="admin-thread-row ${thread.id === selectedId ? "is-active" : ""}"
     data-thread-id="${escapeHtml(thread.id)}"
   >
+    <span class="admin-thread-avatar" aria-hidden="true">${escapeHtml(
+      String(thread.customerName || thread.email || "C")
+        .trim()
+        .slice(0, 1)
+        .toUpperCase()
+    )}</span>
     <div class="admin-thread-main">
-      <strong>${escapeHtml(thread.customerName || "Website Visitor")}</strong>
+      <div class="admin-thread-topline">
+        <strong>${escapeHtml(thread.customerName || "Website Visitor")}</strong>
+        <small>${escapeHtml(formatConversationListTime(thread.lastMessageAt || thread.updatedAt))}</small>
+      </div>
       <span class="admin-thread-email">${escapeHtml(thread.email || "No email")}</span>
       <p class="admin-thread-preview">${escapeHtml(getAdminConversationPreview(thread))}</p>
-    </div>
-    <div class="admin-thread-side">
-      <small>${escapeHtml(formatConversationListTime(thread.lastMessageAt || thread.updatedAt))}</small>
-      ${thread.adminUnreadCount ? `<span class="admin-unread-badge">${formatNumber(thread.adminUnreadCount)}</span>` : ""}
+      <div class="admin-thread-bottomline">
+        <span class="admin-pill ${getStatusClass(thread.status || "open")}">${escapeHtml(
+          formatStatusLabel(thread.status || "open")
+        )}</span>
+        ${thread.adminUnreadCount ? `<span class="admin-unread-badge">${formatNumber(thread.adminUnreadCount)} unread</span>` : ""}
+      </div>
     </div>
   </button>
 `;
@@ -819,6 +831,7 @@ const PAYMENT_FILTER_OPTIONS = [
 ];
 const PAYMENT_REVIEW_STATUSES = ["pending", "paid", "failed", "refunded", "cancelled"];
 const isCompactAdminViewport = () => window.matchMedia("(max-width: 1200px)").matches;
+const isAdminSupportCompactViewport = () => window.matchMedia("(max-width: 999px)").matches;
 const normalizeStatusValue = (value) =>
   String(value || "")
     .trim()
@@ -1629,34 +1642,155 @@ const getChartLegendPoints = (points, maxItems = 6) => {
   return selected;
 };
 
+const getChartTickValues = (maxValue, tickCount = 4) => {
+  const safeMax = Math.max(Number(maxValue || 0), 1);
+  return Array.from({ length: tickCount + 1 }, (_, index) => (safeMax / tickCount) * (tickCount - index));
+};
+
+const getChartAxisIndices = (length, maxItems = 6) => {
+  if (length <= maxItems) {
+    return Array.from({ length }, (_, index) => index);
+  }
+
+  const selected = [];
+  const step = Math.max(1, Math.floor((length - 1) / Math.max(maxItems - 1, 1)));
+  for (let index = 0; index < length; index += step) {
+    selected.push(index);
+    if (selected.length === maxItems - 1) {
+      break;
+    }
+  }
+  if (selected[selected.length - 1] !== length - 1) {
+    selected.push(length - 1);
+  }
+  return selected;
+};
+
+const formatChartMoneyTick = (value, currency = "USD") => {
+  const amount = Number(value || 0);
+  if (amount >= 1000) {
+    return formatMoney(amount, currency).replace(/\.00\b/, "");
+  }
+  return `${formatMoney(amount, currency).replace(/\.00\b/, "")}`;
+};
+
+const formatChartCountTick = (value) => {
+  const amount = Number(value || 0);
+  if (amount >= 1000) {
+    return `${(amount / 1000).toFixed(amount >= 10000 ? 0 : 1)}k`;
+  }
+  return String(Math.round(amount));
+};
+
+const buildChartTitle = (lines) =>
+  escapeHtml(
+    (Array.isArray(lines) ? lines : [])
+      .map((line) => String(line || "").trim())
+      .filter(Boolean)
+      .join("\n")
+  );
+
+const buildSmoothLinePath = (coords = []) => {
+  if (!coords.length) {
+    return "";
+  }
+
+  if (coords.length === 1) {
+    return `M ${coords[0].x} ${coords[0].y}`;
+  }
+
+  let path = `M ${coords[0].x} ${coords[0].y}`;
+  for (let index = 0; index < coords.length - 1; index += 1) {
+    const current = coords[index];
+    const next = coords[index + 1];
+    const controlX = (current.x + next.x) / 2;
+    path += ` C ${controlX} ${current.y}, ${controlX} ${next.y}, ${next.x} ${next.y}`;
+  }
+  return path;
+};
+
+const buildChartGrid = (ticks, config = {}) => {
+  const left = Number(config.left ?? 52);
+  const right = Number(config.right ?? 18);
+  const width = Number(config.width ?? 360);
+  const top = Number(config.top ?? 18);
+  const bottom = Number(config.bottom ?? 38);
+  const height = Number(config.height ?? 220);
+  const chartHeight = height - top - bottom;
+  const maxValue = Math.max(...ticks, 1);
+  const tickFormatter = typeof config.tickFormatter === "function" ? config.tickFormatter : formatChartCountTick;
+
+  return `
+    <g class="admin-chart-grid">
+      ${ticks
+        .map((tick) => {
+          const y = top + ((maxValue - tick) / maxValue) * chartHeight;
+          return `
+            <g class="admin-chart-grid-row">
+              <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="admin-chart-grid-line"></line>
+              <text x="${left - 10}" y="${y + 4}" text-anchor="end" class="admin-chart-axis-label">${escapeHtml(
+                tickFormatter(tick)
+              )}</text>
+            </g>
+          `;
+        })
+        .join("")}
+    </g>
+  `;
+};
+
 const buildLineChart = (points, options = {}) => {
   const series = Array.isArray(points) ? points : [];
   const values = series.map((item) => Number(item.value || 0));
   const max = Math.max(...values, 1);
+  const chart = { width: 360, height: 220, left: 52, right: 18, top: 18, bottom: 38 };
+  const chartWidth = chart.width - chart.left - chart.right;
+  const chartHeight = chart.height - chart.top - chart.bottom;
   const coords = series.map((item, index) => {
-    const x = 20 + (index * 280) / Math.max(series.length - 1, 1);
-    const y = 128 - (Number(item.value || 0) / max) * 92;
-    return { x, y, label: item.label, value: Number(item.value || 0) };
+    const x = chart.left + (index * chartWidth) / Math.max(series.length - 1, 1);
+    const y = chart.top + chartHeight - (Number(item.value || 0) / max) * chartHeight;
+    return { x, y, label: item.label, value: Number(item.value || 0), raw: item };
   });
-  const polyline = coords.map((point) => `${point.x},${point.y}`).join(" ");
+  const linePath = buildSmoothLinePath(coords);
   const valueFormatter = typeof options.valueFormatter === "function" ? options.valueFormatter : formatNumber;
-  const legendPoints = getChartLegendPoints(series, options.legendItems || 6);
+  const tickFormatter = typeof options.tickFormatter === "function" ? options.tickFormatter : valueFormatter;
+  const axisIndices = getChartAxisIndices(series.length, options.legendItems || 6);
+  const ticks = getChartTickValues(max, 4);
 
   return `
     <div class="admin-chart-card">
-      <svg viewBox="0 0 320 160" class="admin-chart-svg" aria-hidden="true">
-        <path d="M20 128.5H300" class="admin-chart-axis"></path>
-        <polyline points="${polyline}" class="admin-chart-line ${escapeHtml(options.lineClass || "")}"></polyline>
+      <svg viewBox="0 0 ${chart.width} ${chart.height}" class="admin-chart-svg" aria-hidden="true">
+        ${buildChartGrid(ticks, { ...chart, tickFormatter })}
+        <line x1="${chart.left}" y1="${chart.height - chart.bottom}" x2="${chart.width - chart.right}" y2="${
+          chart.height - chart.bottom
+        }" class="admin-chart-axis"></line>
+        <path d="${linePath}" class="admin-chart-line ${escapeHtml(options.lineClass || "")}"></path>
         ${coords
           .map(
             (point) => `
-              <circle cx="${point.x}" cy="${point.y}" r="4" class="admin-chart-dot ${escapeHtml(options.dotClass || "")}"></circle>
+              <circle cx="${point.x}" cy="${point.y}" r="4.5" class="admin-chart-dot ${escapeHtml(options.dotClass || "")}">
+                <title>${buildChartTitle([
+                  point.label,
+                  `Revenue: ${valueFormatter(point.value)}`,
+                  point.raw?.orders ? `Orders: ${formatNumber(point.raw.orders)}` : "",
+                ])}</title>
+              </circle>
             `
           )
           .join("")}
+        ${axisIndices
+          .map((index) => {
+            const point = coords[index];
+            return `
+              <text x="${point.x}" y="${chart.height - 12}" text-anchor="middle" class="admin-chart-axis-label admin-chart-axis-label-x">
+                ${escapeHtml(point.label)}
+              </text>
+            `;
+          })
+          .join("")}
       </svg>
       <div class="admin-chart-legend">
-        ${legendPoints
+        ${getChartLegendPoints(series, options.legendItems || 6)
           .map(
             (point) => `
               <div>
@@ -1676,20 +1810,27 @@ const buildBarChart = (points, options = {}) => {
   const values = series.map((item) => Number(item.value || 0));
   const max = Math.max(...values, 1);
   const valueFormatter = typeof options.valueFormatter === "function" ? options.valueFormatter : formatNumber;
-  const barWidth = Math.max(8, Math.min(26, Math.floor(220 / Math.max(series.length, 1))));
-  const gap = Math.max(6, Math.floor((280 - barWidth * Math.max(series.length, 1)) / Math.max(series.length, 1)));
-  const startX = 24;
-  const legendPoints = getChartLegendPoints(series, options.legendItems || 6);
+  const chart = { width: 360, height: 220, left: 52, right: 18, top: 18, bottom: 38 };
+  const chartWidth = chart.width - chart.left - chart.right;
+  const chartHeight = chart.height - chart.top - chart.bottom;
+  const barWidth = Math.max(12, Math.min(26, Math.floor((chartWidth - 10) / Math.max(series.length * 1.4, 1))));
+  const gap = Math.max(8, (chartWidth - barWidth * Math.max(series.length, 1)) / Math.max(series.length - 1, 1));
+  const tickFormatter = typeof options.tickFormatter === "function" ? options.tickFormatter : valueFormatter;
+  const ticks = getChartTickValues(max, 4);
+  const axisIndices = getChartAxisIndices(series.length, options.legendItems || 6);
 
   return `
     <div class="admin-chart-card">
-      <svg viewBox="0 0 320 160" class="admin-chart-svg" aria-hidden="true">
-        <path d="M20 128.5H300" class="admin-chart-axis"></path>
+      <svg viewBox="0 0 ${chart.width} ${chart.height}" class="admin-chart-svg" aria-hidden="true">
+        ${buildChartGrid(ticks, { ...chart, tickFormatter })}
+        <line x1="${chart.left}" y1="${chart.height - chart.bottom}" x2="${chart.width - chart.right}" y2="${
+          chart.height - chart.bottom
+        }" class="admin-chart-axis"></line>
         ${series
           .map((point, index) => {
-            const height = (Number(point.value || 0) / max) * 92;
-            const x = startX + index * (barWidth + gap);
-            const y = 128 - height;
+            const height = (Number(point.value || 0) / max) * chartHeight;
+            const x = chart.left + index * (barWidth + gap);
+            const y = chart.top + chartHeight - height;
             return `
               <rect
                 x="${x}"
@@ -1698,13 +1839,26 @@ const buildBarChart = (points, options = {}) => {
                 height="${height}"
                 rx="8"
                 class="admin-chart-bar ${escapeHtml(options.barClass || "")}"
-              ></rect>
+              >
+                <title>${buildChartTitle([point.label, valueFormatter(point.value)])}</title>
+              </rect>
+            `;
+          })
+          .join("")}
+        ${axisIndices
+          .map((index) => {
+            const point = series[index];
+            const x = chart.left + index * (barWidth + gap) + barWidth / 2;
+            return `
+              <text x="${x}" y="${chart.height - 12}" text-anchor="middle" class="admin-chart-axis-label admin-chart-axis-label-x">
+                ${escapeHtml(point.label)}
+              </text>
             `;
           })
           .join("")}
       </svg>
       <div class="admin-chart-legend">
-        ${legendPoints
+        ${getChartLegendPoints(series, options.legendItems || 6)
           .map(
             (point) => `
               <div>
@@ -1724,34 +1878,55 @@ const buildMultiLineChart = (series, options = {}) => {
   const allPoints = groups.flatMap((entry) => entry.points);
   const max = Math.max(...allPoints.map((item) => Number(item.value || 0)), 1);
   const legendSource = groups[0]?.points || [];
-  const axisLabels = getChartLegendPoints(legendSource, options.legendItems || 6);
+  const chart = { width: 360, height: 220, left: 52, right: 18, top: 18, bottom: 38 };
+  const chartWidth = chart.width - chart.left - chart.right;
+  const chartHeight = chart.height - chart.top - chart.bottom;
+  const axisLabels = getChartAxisIndices(legendSource.length, options.legendItems || 6);
   const valueFormatter = typeof options.valueFormatter === "function" ? options.valueFormatter : formatNumber;
+  const tickFormatter = typeof options.tickFormatter === "function" ? options.tickFormatter : valueFormatter;
+  const ticks = getChartTickValues(max, 4);
 
   return `
     <div class="admin-chart-card">
-      <svg viewBox="0 0 320 160" class="admin-chart-svg" aria-hidden="true">
-        <path d="M20 128.5H300" class="admin-chart-axis"></path>
+      <svg viewBox="0 0 ${chart.width} ${chart.height}" class="admin-chart-svg" aria-hidden="true">
+        ${buildChartGrid(ticks, { ...chart, tickFormatter })}
+        <line x1="${chart.left}" y1="${chart.height - chart.bottom}" x2="${chart.width - chart.right}" y2="${
+          chart.height - chart.bottom
+        }" class="admin-chart-axis"></line>
         ${groups
           .map((entry) => {
             const coords = entry.points.map((point, index) => {
-              const x = 20 + (index * 280) / Math.max(entry.points.length - 1, 1);
-              const y = 128 - (Number(point.value || 0) / max) * 92;
-              return { x, y };
+              const x = chart.left + (index * chartWidth) / Math.max(entry.points.length - 1, 1);
+              const y = chart.top + chartHeight - (Number(point.value || 0) / max) * chartHeight;
+              return { x, y, label: point.label, value: Number(point.value || 0) };
             });
             return `
-              <polyline
-                points="${coords.map((point) => `${point.x},${point.y}`).join(" ")}"
+              <path
+                d="${buildSmoothLinePath(coords)}"
                 class="admin-chart-line ${escapeHtml(entry.lineClass || "")}"
-              ></polyline>
+              ></path>
               ${coords
                 .map(
                   (point) => `
-                    <circle cx="${point.x}" cy="${point.y}" r="3.5" class="admin-chart-dot ${escapeHtml(
+                    <circle cx="${point.x}" cy="${point.y}" r="4" class="admin-chart-dot ${escapeHtml(
                       entry.dotClass || ""
-                    )}"></circle>
+                    )}">
+                      <title>${buildChartTitle([point.label, `${entry.label}: ${valueFormatter(point.value)}`])}</title>
+                    </circle>
                   `
                 )
                 .join("")}
+            `;
+          })
+          .join("")}
+        ${axisLabels
+          .map((index) => {
+            const point = legendSource[index];
+            const x = chart.left + (index * chartWidth) / Math.max(legendSource.length - 1, 1);
+            return `
+              <text x="${x}" y="${chart.height - 12}" text-anchor="middle" class="admin-chart-axis-label admin-chart-axis-label-x">
+                ${escapeHtml(point.label)}
+              </text>
             `;
           })
           .join("")}
@@ -1769,7 +1944,7 @@ const buildMultiLineChart = (series, options = {}) => {
           .join("")}
       </div>
       <div class="admin-chart-legend">
-        ${axisLabels
+        ${getChartLegendPoints(legendSource, options.legendItems || 6)
           .map(
             (point) => `
               <div>
@@ -1820,6 +1995,72 @@ const buildDashboardBreakdownList = (items, emptyTitle, emptyDescription) => {
     </div>
   `;
 };
+
+const calculateDashboardTrend = (current, previous) => {
+  const safeCurrent = Number(current || 0);
+  const safePrevious = Number(previous || 0);
+  if (!safePrevious && !safeCurrent) {
+    return { direction: "flat", percentage: 0, label: "No change" };
+  }
+  if (!safePrevious && safeCurrent > 0) {
+    return { direction: "up", percentage: 100, label: "New activity" };
+  }
+
+  const delta = safeCurrent - safePrevious;
+  const percentage = Math.round((Math.abs(delta) / Math.max(Math.abs(safePrevious), 1)) * 100);
+  return {
+    direction: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
+    percentage,
+    label: `${delta > 0 ? "Up" : delta < 0 ? "Down" : "Flat"} ${percentage}%`,
+  };
+};
+
+const renderDashboardTrend = (trend, comparisonLabel = "vs previous period") => {
+  const icon = trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "→";
+  return `
+    <span class="admin-dashboard-trend is-${escapeHtml(trend.direction)}">
+      <strong>${escapeHtml(icon)} ${trend.percentage}%</strong>
+      <small>${escapeHtml(comparisonLabel)}</small>
+    </span>
+  `;
+};
+
+const renderDashboardKpiCard = ({ icon, title, value, detail, trend, comparisonLabel }) => `
+  <article class="admin-dashboard-kpi">
+    <div class="admin-dashboard-kpi-head">
+      <span class="admin-dashboard-kpi-icon" aria-hidden="true">${escapeHtml(icon)}</span>
+      <span>${escapeHtml(title)}</span>
+    </div>
+    <strong>${escapeHtml(value)}</strong>
+    <div class="admin-dashboard-kpi-foot">
+      ${renderDashboardTrend(trend, comparisonLabel)}
+      <small>${escapeHtml(detail)}</small>
+    </div>
+  </article>
+`;
+
+const getSupportCustomerSpend = (customerOrders = []) =>
+  customerOrders.reduce((sum, order) => sum + Number(order?.subtotal || order?.totalAmount || 0), 0);
+
+const getSupportConversationHeaderSummary = (selected, customerOrders = []) => {
+  const latestOrder = customerOrders[0];
+  if (latestOrder?.orderNumber || latestOrder?.orderId) {
+    return {
+      orderNumber: latestOrder.orderNumber || latestOrder.orderId || latestOrder.id || "-",
+      orderStatus: formatStatusLabel(latestOrder.orderStatus || latestOrder.status || "pending"),
+      orderAmount: formatMoney(latestOrder.totalAmount || latestOrder.subtotal || 0, latestOrder.currency || "USD"),
+    };
+  }
+
+  return {
+    orderNumber: selected?.relatedOrderNumber || "No linked order",
+    orderStatus: formatStatusLabel(selected?.status || "open"),
+    orderAmount: customerOrders.length ? formatMoney(getSupportCustomerSpend(customerOrders), "USD") : "No spend yet",
+  };
+};
+
+const getAdminConversationContextLabel = (thread) =>
+  String(getAdminConversationContext(thread) || "Support conversation").replace(/鈥\?/g, "•").replace(/\s+•\s+/g, " • ");
 
 const renderDashboardSectionLegacy = async () => {
   const stats = null;
@@ -1982,6 +2223,7 @@ async function renderDashboardSectionV2() {
     const revenueTrend = (revenueRange === 30 ? stats?.revenue?.trend30 : stats?.revenue?.trend7 || []).map((item) => ({
       label: formatShortDate(item.key),
       value: Number(item.value || 0),
+      orders: Number(item.orders || item.count || 0),
     }));
     const visitorTrend = (stats?.visitors?.trend7 || []).map((item) => ({
       label: formatShortDate(item.key),
@@ -1991,6 +2233,23 @@ async function renderDashboardSectionV2() {
       label: formatShortDate(item.key),
       value: Number(item.value || 0),
     }));
+    const inquiryDelta = calculateDashboardTrend(
+      stats?.inquiries?.today || 0,
+      Number(stats?.inquiries?.trend7?.[stats?.inquiries?.trend7?.length - 2]?.value || 0)
+    );
+    const unreadDelta = calculateDashboardTrend(stats?.unreadMessages?.total || 0, stats?.conversations?.today || 0);
+    const pendingDelta = calculateDashboardTrend(
+      stats?.orders?.pending || 0,
+      Number(stats?.orders?.trend7?.[stats?.orders?.trend7?.length - 2]?.value || 0)
+    );
+    const revenueDelta = calculateDashboardTrend(
+      stats?.revenue?.today || 0,
+      Number(stats?.revenue?.trend7?.[stats?.revenue?.trend7?.length - 2]?.value || 0)
+    );
+    const visitorDelta = calculateDashboardTrend(
+      stats?.visitors?.today || 0,
+      Number(stats?.visitors?.trend7?.[stats?.visitors?.trend7?.length - 2]?.value || 0)
+    );
 
     contentRoot.innerHTML = `
       <div class="admin-stack admin-dashboard-stack admin-dashboard-v3">
@@ -2008,31 +2267,46 @@ async function renderDashboardSectionV2() {
         </section>
 
         <section class="admin-dashboard-kpis admin-dashboard-kpis-v3">
-          <article class="admin-dashboard-kpi">
-            <span>New Inquiries</span>
-            <strong>${formatNumber(stats?.inquiries?.today || 0)}</strong>
-            <small>${formatNumber(stats?.inquiries?.total || 0)} total inquiries</small>
-          </article>
-          <article class="admin-dashboard-kpi">
-            <span>Unread Messages</span>
-            <strong>${formatNumber(stats?.unreadMessages?.total || 0)}</strong>
-            <small>${formatNumber(stats?.conversations?.today || 0)} new conversations today</small>
-          </article>
-          <article class="admin-dashboard-kpi">
-            <span>Pending Orders</span>
-            <strong>${formatNumber(stats?.orders?.pending || 0)}</strong>
-            <small>${formatNumber(stats?.orders?.today || 0)} orders created today</small>
-          </article>
-          <article class="admin-dashboard-kpi">
-            <span>Revenue</span>
-            <strong>${escapeHtml(formatMoney(stats?.revenue?.today || 0, stats?.revenue?.currency || "USD"))}</strong>
-            <small>This month ${escapeHtml(formatMoney(stats?.revenue?.monthly || 0, stats?.revenue?.currency || "USD"))}</small>
-          </article>
-          <article class="admin-dashboard-kpi">
-            <span>Visitors</span>
-            <strong>${formatNumber(stats?.visitors?.today || 0)}</strong>
-            <small>${formatNumber(stats?.pageViews?.today || 0)} page views today</small>
-          </article>
+          ${renderDashboardKpiCard({
+            icon: "IQ",
+            title: "New Inquiries",
+            value: formatNumber(stats?.inquiries?.today || 0),
+            detail: `${formatNumber(stats?.inquiries?.total || 0)} total inquiries`,
+            trend: inquiryDelta,
+            comparisonLabel: "vs yesterday",
+          })}
+          ${renderDashboardKpiCard({
+            icon: "MS",
+            title: "Unread Messages",
+            value: formatNumber(stats?.unreadMessages?.total || 0),
+            detail: `${formatNumber(stats?.conversations?.today || 0)} new conversations today`,
+            trend: unreadDelta,
+            comparisonLabel: "in live inbox",
+          })}
+          ${renderDashboardKpiCard({
+            icon: "OR",
+            title: "Pending Orders",
+            value: formatNumber(stats?.orders?.pending || 0),
+            detail: `${formatNumber(stats?.orders?.today || 0)} orders created today`,
+            trend: pendingDelta,
+            comparisonLabel: "vs yesterday",
+          })}
+          ${renderDashboardKpiCard({
+            icon: "$",
+            title: "Revenue",
+            value: formatMoney(stats?.revenue?.today || 0, stats?.revenue?.currency || "USD"),
+            detail: `This month ${formatMoney(stats?.revenue?.monthly || 0, stats?.revenue?.currency || "USD")}`,
+            trend: revenueDelta,
+            comparisonLabel: "vs yesterday",
+          })}
+          ${renderDashboardKpiCard({
+            icon: "VS",
+            title: "Visitors",
+            value: formatNumber(stats?.visitors?.today || 0),
+            detail: `${formatNumber(stats?.pageViews?.today || 0)} page views today`,
+            trend: visitorDelta,
+            comparisonLabel: "vs yesterday",
+          })}
         </section>
 
         <section class="admin-dashboard-overview">
@@ -2056,6 +2330,7 @@ async function renderDashboardSectionV2() {
             ${hasChartData(revenueTrend)
               ? buildLineChart(revenueTrend, {
                   valueFormatter: (value) => formatMoney(value, stats?.revenue?.currency || "USD"),
+                  tickFormatter: (value) => formatChartMoneyTick(value, stats?.revenue?.currency || "USD"),
                   legendItems: revenueRange === 30 ? 6 : 7,
                 })
               : renderDashboardChartEmptyState()}
@@ -2077,7 +2352,7 @@ async function renderDashboardSectionV2() {
             ${hasSeriesChartData([
               { points: visitorTrend },
               { points: inquiryTrend },
-            ])
+                ])
               ? buildMultiLineChart([
                   {
                     label: "Visitors",
@@ -2093,7 +2368,9 @@ async function renderDashboardSectionV2() {
                     dotClass: "admin-chart-dot-secondary",
                     swatchClass: "admin-chart-series-secondary",
                   },
-                ])
+                ], {
+                  tickFormatter: formatChartCountTick,
+                })
               : renderDashboardChartEmptyState()}
           </article>
         </section>
@@ -4597,7 +4874,7 @@ const loadCustomersSectionData = async () => {
 
 const updateAdminConversationListDom = () => {
   const listRoot = contentRoot.querySelector(".admin-thread-list");
-  const countNode = contentRoot.querySelector(".admin-thread-panel .admin-panel-header p");
+  const countNode = contentRoot.querySelector(".admin-thread-count");
   const emptyNode = contentRoot.querySelector(".admin-thread-panel .admin-empty-state");
   const conversations = adminSupportRuntime.conversations;
   const selectedId = adminState.customers.selectedId;
@@ -4629,6 +4906,9 @@ const updateAdminConversationListDom = () => {
   listRoot.querySelectorAll("[data-thread-id]").forEach((button) => {
     button.addEventListener("click", async () => {
       adminState.customers.selectedId = button.dataset.threadId || null;
+      if (isAdminSupportCompactViewport()) {
+        adminState.customers.mobileView = "chat";
+      }
       adminSupportRuntime.sendStatusMessage = "";
       adminSupportRuntime.sendStatusType = "neutral";
       await renderCurrentSection();
@@ -4654,13 +4934,23 @@ const updateAdminSelectedConversationHeader = () => {
 
   const summaryNode = headerRoot.querySelector(".admin-chat-header-summary");
   if (summaryNode) {
-    summaryNode.textContent = getAdminConversationContext(selected) || "Support conversation";
+    const liveState = getAdminSupportLiveLabel(adminSupportRuntime.liveState);
+    summaryNode.innerHTML = `
+      ${selected.country ? `<span class="admin-chat-header-country">${escapeHtml(selected.country)}</span>` : ""}
+      <span>${escapeHtml(getAdminConversationContextLabel(selected))}</span>
+      <span id="admin-support-live-status" data-state="${escapeHtml(adminSupportRuntime.liveState)}">${escapeHtml(liveState)}</span>
+    `;
   }
 
   const liveNode = headerRoot.querySelector("#admin-support-live-status");
   if (liveNode) {
     liveNode.textContent = getAdminSupportLiveLabel(adminSupportRuntime.liveState);
     liveNode.dataset.state = adminSupportRuntime.liveState || "idle";
+  }
+
+  const titleNode = headerRoot.querySelector(".admin-chat-header-title");
+  if (titleNode) {
+    titleNode.textContent = selected.customerName || "Website Visitor";
   }
 
   const statusSelect = headerRoot.querySelector("#thread-status-select");
@@ -4730,126 +5020,112 @@ const setAdminReplyFormSendingState = (sending) => {
   }
 };
 
-const createCustomerPanelMarkup = (selected, customerOrders = []) => `
-  <aside class="admin-panel admin-customer-panel">
-    ${
-      selected
-        ? `
-          <div class="admin-customer-crm-card">
-            <div class="admin-customer-profile-head">
-              <span class="admin-customer-avatar">${escapeHtml((selected.customerName || selected.email || "C").slice(0, 1).toUpperCase())}</span>
-              <div class="admin-customer-profile-copy">
-                <h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3>
-                <p class="admin-break-anywhere">${escapeHtml(selected.email || "No email")}</p>
-                <div class="admin-customer-profile-badges">
-                  <span class="admin-pill ${getStatusClass(selected.status)}">${escapeHtml(formatStatusLabel(selected.status || "open"))}</span>
-                  <span class="admin-pill">${escapeHtml(formatStatusLabel(selected.customerType || selected.conversationType || "retail"))}</span>
-                </div>
-              </div>
-            </div>
-            <div class="admin-customer-stat-grid">
-              <article class="admin-customer-stat-card">
-                <span>Orders</span>
-                <strong>${formatNumber(customerOrders.length)}</strong>
-              </article>
-              <article class="admin-customer-stat-card">
-                <span>Total Spend</span>
-                <strong>${escapeHtml(
-                  formatMoney(
-                    customerOrders.reduce((sum, order) => sum + Number(order.subtotal || order.totalAmount || 0), 0),
-                    "USD"
-                  )
-                )}</strong>
-              </article>
-            </div>
-            <div class="admin-customer-crm-section">
-              <div class="admin-customer-crm-row">
-                <span>Country</span>
-                <strong>${escapeHtml(selected.country || "Not set")}</strong>
-              </div>
-              <div class="admin-customer-crm-row">
-                <span>Company</span>
-                <strong>${escapeHtml(selected.company || "Not set")}</strong>
-              </div>
-              <div class="admin-customer-crm-row">
-                <span>Phone</span>
-                <strong>${escapeHtml(selected.customerPhone || selected.phone || "Not set")}</strong>
-              </div>
-              <div class="admin-customer-crm-row">
-                <span>WhatsApp</span>
-                <strong>${escapeHtml(selected.whatsapp || "Not set")}</strong>
-              </div>
-            </div>
-            <div class="admin-customer-crm-section">
-              <div class="admin-customer-crm-row">
-                <span>Customer Status</span>
-                <select class="admin-compact-select" id="customer-profile-status">${CUSTOMER_STATUSES.map(
-                  (status) =>
-                    `<option value="${status}" ${(selected.customerStatus || "new") === status ? "selected" : ""}>${escapeHtml(
-                      formatStatusLabel(status)
-                    )}</option>`
-                ).join("")}</select>
-              </div>
-              <div class="admin-customer-crm-row">
-                <span>Last Contact</span>
-                <strong>${escapeHtml(formatDate(selected.lastMessageAt || selected.updatedAt))}</strong>
-              </div>
-              <div class="admin-customer-crm-row">
-                <span>Tags</span>
-                <div class="admin-tag-list">
-                  ${
-                    Array.isArray(selected.tags) && selected.tags.length
-                      ? selected.tags.map((tag) => `<span class="admin-tag-chip">${escapeHtml(tag)}</span>`).join("")
-                      : '<span class="admin-muted">None</span>'
-                  }
-                </div>
-              </div>
-              <div class="admin-customer-crm-row">
-                <span>Notes</span>
-                <strong>${escapeHtml(selected.notes || "No notes")}</strong>
-              </div>
-            </div>
-            <div class="admin-customer-crm-section">
-              <div class="admin-customer-crm-row">
-                <span>VIP</span>
-                <strong>${selected.isVip ? "Yes" : "No"}</strong>
-              </div>
-              <div class="admin-customer-crm-row">
-                <span>Blacklist</span>
-                <strong>${selected.isBlacklisted ? "Blocked" : "No"}</strong>
-              </div>
-            </div>
-            <div class="admin-customer-order-summary">
-              <div class="admin-section-head">
-                <h4>Order History</h4>
-              </div>
-              ${
-                customerOrders.length
-                  ? customerOrders
-                      .slice(0, 5)
-                      .map(
-                        (order) => `
-                          <button type="button" class="admin-linked-record-row" data-customer-order-id="${escapeHtml(order.id)}">
-                            <div class="admin-linked-record-main">
-                              <strong>${escapeHtml(order.orderNumber || order.orderId || order.id)}</strong>
-                              <p>${escapeHtml(formatMoney(order.subtotal || order.totalAmount || 0, order.currency || "USD"))}</p>
-                            </div>
-                            <div class="admin-linked-record-side">
-                              <span class="admin-pill ${getStatusClass(order.orderStatus)}">${escapeHtml(formatStatusLabel(order.orderStatus))}</span>
-                              <small>${escapeHtml(formatDate(order.createdAt))}</small>
-                            </div>
-                          </button>
-                        `
-                      )
-                      .join("")
-                  : '<p class="admin-muted">No orders yet.</p>'
-              }
+const createCustomerPanelMarkup = (selected, customerOrders = []) => {
+  if (!selected) {
+    return `
+      <aside class="admin-panel admin-customer-panel">
+        ${renderEmptyState("Customer details", "Select a conversation to view CRM information.")}
+      </aside>
+    `;
+  }
+
+  const totalSpend = getSupportCustomerSpend(customerOrders);
+  const recentOrders = customerOrders.slice(0, 3);
+
+  return `
+    <aside class="admin-panel admin-customer-panel">
+      <div class="admin-customer-crm-card">
+        <section class="admin-customer-crm-hero">
+          <span class="admin-customer-avatar">${escapeHtml((selected.customerName || selected.email || "C").slice(0, 1).toUpperCase())}</span>
+          <div class="admin-customer-profile-copy">
+            <h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3>
+            <p class="admin-break-anywhere">${escapeHtml(selected.email || "No email")}</p>
+            <div class="admin-customer-profile-badges">
+              <span class="admin-pill ${getStatusClass(selected.status || "open")}">${escapeHtml(
+                formatStatusLabel(selected.status || "open")
+              )}</span>
+              <span class="admin-pill">${escapeHtml(
+                formatStatusLabel(selected.customerType || selected.conversationType || "retail")
+              )}</span>
             </div>
           </div>
-        `
-        : renderEmptyState("Customer details", "Select a conversation to view customer information.")
-    }
-  </aside>`;
+        </section>
+
+        <section class="admin-customer-crm-section">
+          <div class="admin-customer-stat-grid">
+            <article class="admin-customer-stat-card">
+              <span>Orders</span>
+              <strong>${formatNumber(customerOrders.length)}</strong>
+            </article>
+            <article class="admin-customer-stat-card">
+              <span>Total Spend</span>
+              <strong>${escapeHtml(formatMoney(totalSpend, "USD"))}</strong>
+            </article>
+          </div>
+        </section>
+
+        <section class="admin-customer-crm-section">
+          <div class="admin-customer-crm-row"><span>Name</span><strong>${escapeHtml(selected.customerName || "Not set")}</strong></div>
+          <div class="admin-customer-crm-row"><span>Email</span><strong class="admin-break-anywhere">${escapeHtml(selected.email || "Not set")}</strong></div>
+          <div class="admin-customer-crm-row"><span>Country</span><strong>${escapeHtml(selected.country || "Not set")}</strong></div>
+          <div class="admin-customer-crm-row"><span>Company</span><strong>${escapeHtml(selected.company || "Not set")}</strong></div>
+          <div class="admin-customer-crm-row"><span>Phone</span><strong>${escapeHtml(selected.customerPhone || selected.phone || "Not set")}</strong></div>
+          <div class="admin-customer-crm-row">
+            <span>Customer Status</span>
+            <select class="admin-compact-select" id="customer-profile-status">${CUSTOMER_STATUSES.map(
+              (status) =>
+                `<option value="${status}" ${(selected.customerStatus || "new") === status ? "selected" : ""}>${escapeHtml(
+                  formatStatusLabel(status)
+                )}</option>`
+            ).join("")}</select>
+          </div>
+          <div class="admin-customer-crm-row"><span>Last Activity</span><strong>${escapeHtml(
+            formatDate(selected.lastMessageAt || selected.updatedAt)
+          )}</strong></div>
+          <div class="admin-customer-crm-row"><span>Tags</span><div class="admin-tag-list">${
+            Array.isArray(selected.tags) && selected.tags.length
+              ? selected.tags.map((tag) => `<span class="admin-tag-chip">${escapeHtml(tag)}</span>`).join("")
+              : '<span class="admin-muted">None</span>'
+          }</div></div>
+        </section>
+
+        <section class="admin-customer-crm-section">
+          <div class="admin-section-head">
+            <h4>Recent Orders</h4>
+          </div>
+          ${
+            recentOrders.length
+              ? `
+                <div class="admin-linked-record-list admin-support-order-list">
+                  ${recentOrders
+                    .map(
+                      (order) => `
+                        <button type="button" class="admin-linked-record-row" data-customer-order-id="${escapeHtml(order.id)}">
+                          <div class="admin-linked-record-main">
+                            <strong>${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
+                            <p>${escapeHtml(order.productNameSnapshot || order.productName || "Order item")}</p>
+                          </div>
+                          <div class="admin-linked-record-side">
+                            <span>${escapeHtml(
+                              formatMoney(order.totalAmount || order.subtotal || 0, order.currency || "USD")
+                            )}</span>
+                            <span class="admin-pill ${getStatusClass(order.orderStatus || order.status)}">${escapeHtml(
+                              formatStatusLabel(order.orderStatus || order.status || "pending")
+                            )}</span>
+                          </div>
+                        </button>
+                      `
+                    )
+                    .join("")}
+                </div>
+              `
+              : '<p class="admin-muted">No recent orders.</p>'
+          }
+        </section>
+      </div>
+    </aside>
+  `;
+};
 
 const renderCustomersSectionView = (options = {}) => {
   const preservedDraft = options.clearDraft ? "" : getAdminSupportComposerDraft();
@@ -4859,51 +5135,53 @@ const renderCustomersSectionView = (options = {}) => {
   const customerOrders = Array.isArray(adminSupportRuntime.customerOrders) ? adminSupportRuntime.customerOrders : [];
   const detailError = adminSupportRuntime.detailError;
   const liveLabel = adminSupportRuntime.liveLabel || getAdminSupportLiveLabel(adminSupportRuntime.liveState);
+  const compactSupportViewport = isAdminSupportCompactViewport();
+  const activeMobileView = compactSupportViewport
+    ? selected
+      ? adminState.customers.mobileView === "list"
+        ? "list"
+        : "chat"
+      : "list"
+    : "chat";
+  const showThreadList = !compactSupportViewport || activeMobileView === "list";
+  const showChatPanel = !compactSupportViewport || activeMobileView === "chat";
+  const showCrmPanel = !compactSupportViewport || activeMobileView === "chat";
+  const headerSummary = getSupportConversationHeaderSummary(selected, customerOrders);
+
   adminSupportRuntime.selected = selected;
+  adminState.customers.mobileView = activeMobileView;
 
   contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <div class="admin-chat-layout admin-support-layout">
-        <section class="admin-panel admin-thread-panel">
+    <div class="admin-stack admin-support-shell ${compactSupportViewport ? "is-compact" : "is-desktop"}">
+      <div class="admin-chat-layout admin-support-layout" data-support-view="${escapeHtml(activeMobileView)}">
+        <section class="admin-panel admin-thread-panel" ${showThreadList ? "" : "hidden"}>
           <div class="admin-thread-panel-head">
-            <div class="admin-panel-header admin-panel-header-compact">
+            <div class="admin-panel-header admin-panel-header-compact admin-thread-panel-header">
               <div>
                 <h3>Customer List</h3>
-                <p>${formatNumber(conversations.length)} active conversation${conversations.length === 1 ? "" : "s"}</p>
+                <p class="admin-thread-count">${formatNumber(conversations.length)} active conversation${
+                  conversations.length === 1 ? "" : "s"
+                }</p>
               </div>
             </div>
-            <div class="admin-thread-filters">
+            <div class="admin-thread-toolbar">
               <label class="admin-search-field admin-search-field-compact">
-                <span>Search</span>
                 <input
                   id="support-search"
                   class="admin-search-input"
                   type="search"
-                  placeholder="Search customer, email, order, product"
+                  placeholder="Search customer, email, order"
                   value="${escapeHtml(adminState.customers.query)}"
                 >
               </label>
-              <div class="admin-thread-filter-row">
-                <label>
+              <div class="admin-thread-filter-row admin-thread-filter-row-v2">
+                <label class="admin-thread-filter">
                   <span>Status</span>
                   <select id="support-status-filter">
                     <option value="all" ${adminState.customers.status === "all" ? "selected" : ""}>All</option>
-                    ${SUPPORT_CONVERSATION_STATUSES.map(
-                      (status) => `
-                        <option value="${status}" ${adminState.customers.status === status ? "selected" : ""}>${formatStatusLabel(status)}</option>
-                      `
-                    ).join("")}
-                  </select>
-                </label>
-                <label>
-                  <span>Type</span>
-                  <select id="support-type-filter">
-                    <option value="all" ${adminState.customers.conversationType === "all" ? "selected" : ""}>All</option>
-                    ${SUPPORT_CONVERSATION_TYPES.map(
-                      (type) => `
-                        <option value="${type}" ${adminState.customers.conversationType === type ? "selected" : ""}>${formatStatusLabel(type)}</option>
-                      `
-                    ).join("")}
+                    <option value="open" ${adminState.customers.status === "open" ? "selected" : ""}>New</option>
+                    <option value="waiting_admin" ${adminState.customers.status === "waiting_admin" ? "selected" : ""}>Waiting Reply</option>
+                    <option value="resolved" ${adminState.customers.status === "resolved" ? "selected" : ""}>Resolved</option>
                   </select>
                 </label>
               </div>
@@ -4913,16 +5191,14 @@ const renderCustomersSectionView = (options = {}) => {
             conversations.length
               ? `
                 <div class="admin-thread-list">
-                  ${conversations
-                    .map((thread) => createAdminConversationRowMarkup(thread, selected?.id))
-                    .join("")}
+                  ${conversations.map((thread) => createAdminConversationRowMarkup(thread, selected?.id)).join("")}
                 </div>
               `
               : renderEmptyState("No customer conversations yet", "Support chats will appear here.")
           }
         </section>
 
-        <section class="admin-panel admin-chat-panel">
+        <section class="admin-panel admin-chat-panel" ${showChatPanel ? "" : "hidden"}>
           ${
             selected
               ? detailError
@@ -4936,18 +5212,31 @@ const renderCustomersSectionView = (options = {}) => {
                 `
                 : `
                   <div class="admin-chat-header">
+                    ${
+                      compactSupportViewport
+                        ? '<button class="admin-secondary-button admin-support-back" type="button" id="support-mobile-back">Back to list</button>'
+                        : ""
+                    }
                     <div class="admin-chat-header-main">
-                      <h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3>
+                      <div class="admin-chat-header-topline">
+                        <h3 class="admin-chat-header-title">${escapeHtml(selected.customerName || "Website Visitor")}</h3>
+                        <span class="admin-pill ${getStatusClass(selected.status || "open")}">${escapeHtml(
+                          formatStatusLabel(selected.status || "open")
+                        )}</span>
+                      </div>
                       <p class="admin-chat-header-email">${escapeHtml(selected.email || "No email")}</p>
-                      <p class="admin-chat-header-summary">${escapeHtml(
-                        getAdminConversationContext(selected) || "Support conversation"
-                      )}</p>
-                      <p class="admin-chat-header-subline">
-                        ${selected.country ? `<span>${escapeHtml(selected.country)}</span><span>&bull;</span>` : ""}
+                      <div class="admin-chat-header-summary">
+                        ${selected.country ? `<span class="admin-chat-header-country">${escapeHtml(selected.country)}</span>` : ""}
+                        <span>${escapeHtml(getAdminConversationContextLabel(selected))}</span>
                         <span id="admin-support-live-status" data-state="${escapeHtml(adminSupportRuntime.liveState)}">${escapeHtml(
                           liveLabel
                         )}</span>
-                      </p>
+                      </div>
+                    </div>
+                    <div class="admin-chat-header-order">
+                      <span>${escapeHtml(headerSummary.orderNumber)}</span>
+                      <strong>${escapeHtml(headerSummary.orderStatus)}</strong>
+                      <small>${escapeHtml(headerSummary.orderAmount)}</small>
                     </div>
                     <div class="admin-chat-header-actions">
                       <label>
@@ -4965,52 +5254,6 @@ const renderCustomersSectionView = (options = {}) => {
                     </div>
                   </div>
 
-                  <div class="admin-info-grid admin-info-grid-tight admin-customer-detail-grid">
-                    <article class="admin-info-card">
-                      <h5>Customer Information</h5>
-                      <dl class="admin-description-grid">
-                        <div><dt>Name</dt><dd>${escapeHtml(selected.customerName || "-")}</dd></div>
-                        <div><dt>Email</dt><dd class="admin-break-anywhere">${escapeHtml(selected.email || "-")}</dd></div>
-                        <div><dt>Phone</dt><dd>${escapeHtml(selected.phone || "-")}</dd></div>
-                        <div><dt>Country</dt><dd>${escapeHtml(selected.country || "-")}</dd></div>
-                      </dl>
-                    </article>
-                    <article class="admin-info-card">
-                      <div class="admin-section-head">
-                        <h5>Order History</h5>
-                      </div>
-                      ${
-                        customerOrders.length
-                          ? `
-                            <div class="admin-linked-record-list">
-                              ${customerOrders
-                                .map(
-                                  (order) => `
-                                    <button class="admin-linked-record-row" type="button" data-customer-order-id="${escapeHtml(
-                                      order.id
-                                    )}">
-                                      <div class="admin-linked-record-main">
-                                        <strong>${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
-                                        <p>${escapeHtml(order.totalAmount || order.subtotal || "-")}</p>
-                                      </div>
-                                      <div class="admin-linked-record-side">
-                                        <span class="admin-pill ${getStatusClass(order.orderStatus)}">${escapeHtml(
-                                          formatStatusLabel(order.orderStatus)
-                                        )}</span>
-                                        <small>${escapeHtml(formatDate(order.createdAt))}</small>
-                                        <span class="admin-link-hint">View Order →</span>
-                                      </div>
-                                    </button>
-                                  `
-                                )
-                                .join("")}
-                            </div>
-                          `
-                          : renderEmptyState("No orders yet", "This customer has no linked order history yet.")
-                      }
-                    </article>
-                  </div>
-
                   <div class="admin-chat-history">
                     ${
                       messages.length
@@ -5020,30 +5263,25 @@ const renderCustomersSectionView = (options = {}) => {
                   </div>
 
                   <div class="admin-chat-footer">
-                    <details class="admin-quick-replies-drawer">
-                      <summary>Quick Replies</summary>
-                      <div class="admin-quick-replies">
-                        ${SUPPORT_QUICK_REPLIES.map(
-                          (reply) => `
-                            <button type="button" class="admin-quick-reply" data-quick-reply="${escapeHtml(reply)}">
-                              ${escapeHtml(reply)}
-                            </button>
-                          `
-                        ).join("")}
-                      </div>
-                    </details>
-
                     <form class="admin-chat-composer" id="customer-reply-form">
-                      <textarea
-                        name="text"
-                        rows="1"
-                        placeholder="Write a reply to the customer"
-                      ></textarea>
+                      <textarea name="text" rows="1" placeholder="Write a reply to the customer"></textarea>
                       <div class="admin-chat-composer-actions">
                         <label class="admin-file-field admin-chat-attach">
                           <input type="file" name="image" accept="image/*">
                           <span>Attach Image</span>
                         </label>
+                        <details class="admin-quick-replies-drawer">
+                          <summary>Quick Reply</summary>
+                          <div class="admin-quick-replies">
+                            ${SUPPORT_QUICK_REPLIES.map(
+                              (reply) => `
+                                <button type="button" class="admin-quick-reply" data-quick-reply="${escapeHtml(reply)}">
+                                  ${escapeHtml(reply)}
+                                </button>
+                              `
+                            ).join("")}
+                          </div>
+                        </details>
                         <button class="admin-primary-button" type="submit" ${adminSupportRuntime.isSending ? "disabled" : ""}>${
                           adminSupportRuntime.isSending ? "Sending..." : "Send Reply"
                         }</button>
@@ -5055,7 +5293,10 @@ const renderCustomersSectionView = (options = {}) => {
               : renderEmptyState("No customer selected", "Choose a customer thread to open the chat window.")
           }
         </section>
-        ${createCustomerPanelMarkup(selected, customerOrders)}
+
+        <div class="admin-support-crm-wrap" ${showCrmPanel ? "" : "hidden"}>
+          ${createCustomerPanelMarkup(selected, customerOrders)}
+        </div>
       </div>
     </div>
   `;
@@ -5089,9 +5330,9 @@ const renderCustomersSectionView = (options = {}) => {
     await renderCurrentSection();
   });
 
-  document.querySelector("#support-type-filter")?.addEventListener("change", async (event) => {
-    adminState.customers.conversationType = event.target.value || "all";
-    await renderCurrentSection();
+  document.querySelector("#support-mobile-back")?.addEventListener("click", () => {
+    adminState.customers.mobileView = "list";
+    renderCustomersSectionView();
   });
 
   updateAdminConversationListDom();
@@ -5104,7 +5345,10 @@ const renderCustomersSectionView = (options = {}) => {
 
   document.querySelector("#customer-profile-status")?.addEventListener("change", async (event) => {
     if (!selected?.customerId) return;
-    await requestJson(`/api/admin/customers/${encodeURIComponent(selected.customerId)}`, { method: "PATCH", body: JSON.stringify({ customerStatus: event.target.value }) });
+    await requestJson(`/api/admin/customers/${encodeURIComponent(selected.customerId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ customerStatus: event.target.value }),
+    });
     selected.customerStatus = event.target.value;
   });
 
@@ -5195,7 +5439,7 @@ const renderCustomersSectionView = (options = {}) => {
       adminSupportRuntime.sendStatusType = "success";
       adminSupportRuntime.isSending = false;
       form.reset();
-      syncAdminReplyTextareaHeight(form.querySelector('textarea'));
+      syncAdminReplyTextareaHeight(form.querySelector("textarea"));
       setAdminReplyFormSendingState(false);
       appendAdminMessagesToDom([result.message], {
         forceScroll: true,
@@ -5339,6 +5583,22 @@ const startAdminSupportLiveSync = () => {
   startAdminSupportPolling();
 };
 
+let lastAdminSupportCompactViewport = isAdminSupportCompactViewport();
+window.addEventListener("resize", () => {
+  const nextCompact = isAdminSupportCompactViewport();
+  if (nextCompact === lastAdminSupportCompactViewport) {
+    return;
+  }
+
+  lastAdminSupportCompactViewport = nextCompact;
+  if (adminState.activeSection !== "customers") {
+    return;
+  }
+
+  adminState.customers.mobileView = nextCompact ? (adminState.customers.selectedId ? "chat" : "list") : "chat";
+  renderCustomersSectionView();
+});
+
 const renderCustomersSection = async () => {
   try {
     await loadCustomersSectionData();
@@ -5358,6 +5618,13 @@ const renderCustomersSection = async () => {
     return;
   }
 
+  adminState.customers.mobileView = isAdminSupportCompactViewport()
+    ? adminState.customers.selectedId
+      ? adminState.customers.mobileView === "list"
+        ? "list"
+        : "chat"
+      : "list"
+    : "chat";
   renderCustomersSectionView();
   startAdminSupportLiveSync();
 };
