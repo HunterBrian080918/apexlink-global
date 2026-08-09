@@ -329,7 +329,7 @@ textarea {
 
 .admin-nav {
   display: grid;
-  gap: 6px;
+  gap: 10px;
   overflow-y: auto;
 }
 
@@ -341,6 +341,84 @@ textarea {
   color: var(--text-soft);
   text-align: left;
   font-weight: 600;
+}
+
+.admin-nav-item,
+.admin-nav-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-nav-group {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-nav-group.is-active-group .admin-nav-group-toggle {
+  color: var(--text);
+}
+
+.admin-nav-group-toggle {
+  justify-content: space-between;
+}
+
+.admin-nav-group-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-nav-group-items {
+  display: grid;
+  gap: 4px;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.24s ease, opacity 0.2s ease;
+}
+
+.admin-nav-group.is-expanded .admin-nav-group-items {
+  max-height: 360px;
+  opacity: 1;
+}
+
+.admin-nav-item-child {
+  padding-left: 42px;
+}
+
+.admin-nav-icon {
+  flex: 0 0 18px;
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.admin-nav-text {
+  min-width: 0;
+}
+
+.admin-nav-chevron {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 0.9rem;
+  transition: transform 0.2s ease;
+}
+
+.admin-nav-group.is-expanded .admin-nav-chevron {
+  transform: rotate(180deg);
+}
+
+.admin-nav-item.is-future {
+  opacity: 0.45;
+  cursor: default;
+  pointer-events: none;
 }
 
 .admin-nav-link {
@@ -604,6 +682,130 @@ textarea {
 .admin-checkbox-field span {
   margin: 0;
   font-weight: 600;
+}
+
+.admin-payment-method-grid,
+.admin-payment-account-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.admin-payment-method-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-payment-account-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-payment-method-card,
+.admin-payment-account-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--surface-muted);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.admin-payment-method-card {
+  cursor: pointer;
+}
+
+.admin-payment-method-card:hover,
+.admin-payment-method-card:has(input:focus-visible),
+.admin-payment-method-card:has(input:checked) {
+  border-color: rgba(29, 78, 216, 0.2);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.admin-payment-method-card input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.admin-payment-method-card-head,
+.admin-payment-account-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-payment-method-copy {
+  min-width: 0;
+}
+
+.admin-payment-method-copy h4,
+.admin-payment-account-head h4 {
+  margin: 0 0 6px;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+
+.admin-payment-method-copy p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.6;
+}
+
+.admin-switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 50px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+}
+
+.admin-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #d0d5dd;
+  transition: background 0.2s ease;
+}
+
+.admin-switch-thumb {
+  position: absolute;
+  left: 4px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.16);
+  transition: transform 0.2s ease;
+}
+
+.admin-payment-method-card:has(input:checked) .admin-switch-track {
+  background: var(--accent);
+}
+
+.admin-payment-method-card:has(input:checked) .admin-switch-thumb {
+  transform: translateX(20px);
+}
+
+.admin-payment-proof-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-payment-proof-preview a {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.admin-payment-proof-preview img {
+  width: min(240px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  object-fit: cover;
 }
 
 .admin-tier-list {
@@ -2818,24 +3020,52 @@ textarea {
 
 @media (max-width: 960px) {
   .admin-shell {
-    grid-template-columns: 1fr;
-    height: auto;
-    overflow: visible;
+    grid-template-columns: 88px minmax(0, 1fr);
+    height: 100vh;
+    overflow: hidden;
   }
 
   .admin-sidebar {
-    position: static;
-    top: auto;
-    align-self: stretch;
-    height: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-    overflow: visible;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    padding: 18px 10px;
+    border-right: 1px solid var(--line);
+    border-bottom: 0;
+    overflow: hidden;
   }
 
   .admin-nav {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    overflow: visible;
+    gap: 8px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .admin-brand {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .admin-brand > span:last-child,
+  .admin-nav-text,
+  .admin-nav-chevron {
+    display: none;
+  }
+
+  .admin-nav-group-toggle,
+  .admin-nav-item {
+    justify-content: center;
+    padding: 12px 10px;
+  }
+
+  .admin-nav-item-child {
+    padding-left: 10px;
+  }
+
+  .admin-nav-group-items {
+    gap: 6px;
   }
 
   .admin-media-picker {
@@ -2843,8 +3073,8 @@ textarea {
   }
 
   .admin-main {
-    height: auto;
-    overflow: visible;
+    height: 100vh;
+    overflow-y: auto;
   }
 
   .admin-chat-layout { grid-template-columns: 1fr; }
@@ -2854,6 +3084,8 @@ textarea {
   .admin-dashboard-activity,
   .admin-dashboard-intelligence,
   .admin-dashboard-operations,
+  .admin-payment-method-grid,
+  .admin-payment-account-grid,
   .admin-customer-stat-grid,
   .admin-thread-filter-row {
     grid-template-columns: 1fr;
@@ -2930,8 +3162,8 @@ textarea {
 }
 
 @media (max-width: 720px) {
-  .admin-nav {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .admin-shell {
+    grid-template-columns: 76px minmax(0, 1fr);
   }
 
   .admin-stat-grid,

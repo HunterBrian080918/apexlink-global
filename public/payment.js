@@ -11,6 +11,7 @@ const paymentForm = document.querySelector("#payment-form");
 const paymentStatus = document.querySelector("#payment-status");
 const buyerDetailsRoot = document.querySelector("#payment-buyer-details");
 const backLink = document.querySelector("#payment-back-link");
+const bankTransferPanel = document.querySelector("#bank-transfer-panel");
 const routes = window.ApexLinkRoutes || {
   products: "/products",
   checkout: "/checkout",
@@ -22,6 +23,9 @@ let isSubmittingPayment = false;
 let currentPayments = [];
 let currentSiteSettings = null;
 let isCapturingPayPal = false;
+const BANK_TRANSFER_PROVIDER = "bank_transfer";
+const WORLD_FIRST_SETTLEMENT_CHANNEL = "WorldFirst";
+const RETAIL_PAYMENT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer"];
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -58,7 +62,61 @@ const requestJson = async (url, options = {}) => {
   return payload;
 };
 
+const requestForm = async (url, formData, options = {}) => {
+  const response = await fetch(url, {
+    method: options.method || "POST",
+    credentials: "same-origin",
+    body: formData,
+    headers: {
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  let payload = {};
+
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      payload = { error: text };
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(String(payload?.error || `Request failed with status ${response.status}.`));
+  }
+
+  return payload;
+};
+
 const isPaidStatus = (value) => String(value || "").trim().toLowerCase() === "paid";
+const normalizePaymentMethodKey = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+const getConfiguredPaymentMethods = () => {
+  if (!Array.isArray(currentSiteSettings?.paymentMethods)) {
+    return RETAIL_PAYMENT_SUPPORTED_METHODS.slice();
+  }
+
+  const seen = new Set();
+  return currentSiteSettings.paymentMethods
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const normalized = normalizePaymentMethodKey(item);
+      if (!normalized || seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+};
+const isBankTransferMethod = (value) => normalizePaymentMethodKey(value) === "bank transfer";
+const isBankTransferPayment = (payment) =>
+  isBankTransferMethod(payment?.paymentMethod) ||
+  String(payment?.paymentProvider || "").trim().toLowerCase() === BANK_TRANSFER_PROVIDER;
 
 const fetchOrderPayments = async (orderId) => {
   const payload = await requestJson(`/api/orders/${encodeURIComponent(orderId)}/payments`, {
@@ -124,19 +182,16 @@ const setupRevealAnimations = () => {
 const formatCurrency = (value) => `$${Number(String(value || "").replace(/[^\d.-]/g, "") || 0).toFixed(2)}`;
 
 const getPaymentMethods = (mode) => {
+  const configured = getConfiguredPaymentMethods();
   if (mode === "retail") {
-    return ["PayPal"];
+    return configured.filter((method) =>
+      RETAIL_PAYMENT_SUPPORTED_METHODS.some(
+        (supportedMethod) => normalizePaymentMethodKey(supportedMethod) === normalizePaymentMethodKey(method)
+      )
+    );
   }
 
-  const configured = Array.isArray(currentSiteSettings?.paymentMethods)
-    ? currentSiteSettings.paymentMethods.map((item) => String(item || "").trim()).filter(Boolean)
-    : [];
-
-  if (configured.length) {
-    return configured;
-  }
-
-  return mode === "wholesale" ? ["PayPal Invoice", "Bank Transfer"] : ["PayPal"];
+  return configured;
 };
 
 const hasDepositConfiguration = (order) => {
@@ -174,6 +229,11 @@ const isPaymentFlowComplete = (order, payments) => {
 
 const getPrimaryRetailPayment = (payments) =>
   (Array.isArray(payments) ? payments : []).find((payment) => payment.paymentType === "full-payment") || null;
+const getPendingBankTransferPayment = (payments) =>
+  (Array.isArray(payments) ? payments : [])
+    .filter((payment) => isBankTransferPayment(payment))
+    .slice()
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0] || null;
 
 const getPaymentTypeLabel = (type) =>
   ({
@@ -183,12 +243,25 @@ const getPaymentTypeLabel = (type) =>
     refund: "Refund",
   }[String(type || "").trim().toLowerCase()] || "Full Payment");
 
-const renderPaymentMethods = (mode, selectedMethod = "") => {
+const getSelectedPaymentMethod = () =>
+  String(paymentForm?.querySelector('input[name="paymentMethod"]:checked')?.value || "").trim();
+
+const renderPaymentMethods = (mode, selectedMethod = "", options = {}) => {
   if (!paymentMethodGrid) {
     return;
   }
 
   const methods = getPaymentMethods(mode);
+  const lockedMethod = String(options.lockedMethod || "").trim();
+  if (!methods.length) {
+    paymentMethodGrid.innerHTML = `
+      <div class="checkout-note-box">
+        <strong>No payment methods enabled</strong>
+        <p>Please contact our team for a manual payment arrangement.</p>
+      </div>
+    `;
+    return;
+  }
   paymentMethodGrid.innerHTML = methods
     .map(
       (method, index) => `
@@ -198,6 +271,7 @@ const renderPaymentMethods = (mode, selectedMethod = "") => {
             name="paymentMethod"
             value="${escapeHtml(method)}"
             ${selectedMethod ? (selectedMethod === method ? "checked" : "") : index === 0 ? "checked" : ""}
+            ${lockedMethod ? "disabled" : ""}
           >
           <span class="payment-method-indicator" aria-hidden="true"></span>
           <span class="payment-method-label">${escapeHtml(method)}</span>
@@ -214,6 +288,9 @@ const setSubmitButtonState = () => {
   if (!submitButton || !currentOrder) {
     return;
   }
+  const activeBankTransferPayment = getPendingBankTransferPayment(currentPayments);
+  const selectedMethod = getSelectedPaymentMethod();
+  const availableMethods = getPaymentMethods(currentOrder.purchaseMode || "retail");
 
   const retailPaid = currentOrder.purchaseMode === "retail" && (
     isPaidStatus(currentOrder.paymentStatus) ||
@@ -239,15 +316,31 @@ const setSubmitButtonState = () => {
     return;
   }
 
+  if (!availableMethods.length) {
+    submitButton.disabled = true;
+    submitButton.textContent = "No Payment Methods Available";
+    return;
+  }
+
+  if (activeBankTransferPayment && !isPaidStatus(activeBankTransferPayment.status)) {
+    submitButton.disabled = false;
+    submitButton.textContent = activeBankTransferPayment.paymentProofUrl ? "Update Payment Proof" : "Submit Payment Proof";
+    return;
+  }
+
   if (currentOrder.purchaseMode === "retail") {
     submitButton.disabled = false;
-    submitButton.textContent = "Continue to PayPal";
+    submitButton.textContent = selectedMethod === "Bank Transfer" ? "Confirm Bank Transfer" : "Continue to PayPal";
     return;
   }
 
   const isComplete = isPaymentFlowComplete(currentOrder, currentPayments);
   submitButton.disabled = isComplete;
-  submitButton.textContent = isComplete ? "Payment Method Confirmed" : "Confirm Payment Method";
+  submitButton.textContent = isComplete
+    ? "Payment Method Confirmed"
+    : selectedMethod === "Bank Transfer"
+      ? "Confirm Bank Transfer"
+      : "Confirm Payment Method";
 };
 
 const renderBuyerDetails = (order) => {
@@ -314,6 +407,8 @@ const buildPaymentRecordPayload = (order, paymentType, paymentMethod) => {
     customerPhone: order.phone || "",
     orderType: order.purchaseMode || "retail",
     paymentMethod,
+    paymentProvider: isBankTransferMethod(paymentMethod) ? BANK_TRANSFER_PROVIDER : "",
+    settlementChannel: isBankTransferMethod(paymentMethod) ? WORLD_FIRST_SETTLEMENT_CHANNEL : "",
     paymentType,
     amount,
     currency: order.currency || "USD",
@@ -322,6 +417,110 @@ const buildPaymentRecordPayload = (order, paymentType, paymentMethod) => {
     billingAddress: order.shippingAddress || "",
     status: "pending",
   };
+};
+
+const getBankTransferCurrencyKey = (order) => {
+  const currency = String(order?.currency || "USD").trim().toUpperCase();
+  return ["USD", "EUR", "GBP"].includes(currency) ? currency : "USD";
+};
+
+const getBankTransferAccount = (order) => {
+  const settings = currentSiteSettings?.bankTransferSettings || {};
+  const currencyKey = getBankTransferCurrencyKey(order);
+  const key = currencyKey.toLowerCase();
+  return {
+    currency: currencyKey,
+    providerName: String(settings.providerName || WORLD_FIRST_SETTLEMENT_CHANNEL).trim() || WORLD_FIRST_SETTLEMENT_CHANNEL,
+    details: settings[key] && typeof settings[key] === "object" ? settings[key] : {},
+  };
+};
+
+const renderBankTransferPanel = () => {
+  if (!bankTransferPanel || !currentOrder) {
+    return;
+  }
+
+  const activeBankTransferPayment = getPendingBankTransferPayment(currentPayments);
+  const selectedMethod = getSelectedPaymentMethod();
+  const shouldShow = Boolean(activeBankTransferPayment) || isBankTransferMethod(selectedMethod);
+
+  if (!shouldShow) {
+    bankTransferPanel.innerHTML = "";
+    return;
+  }
+
+  const bankTransferAccount = getBankTransferAccount(currentOrder);
+  const details = bankTransferAccount.details || {};
+  const paymentId = String(activeBankTransferPayment?.id || "").trim();
+  const proofUrl = String(activeBankTransferPayment?.paymentProofUrl || "").trim();
+  const transactionReference = String(
+    activeBankTransferPayment?.transactionId || activeBankTransferPayment?.providerReference || ""
+  ).trim();
+
+  const detailRows = bankTransferAccount.currency === "USD"
+    ? `
+      <div class="checkout-summary-row full"><span>Bank Name</span><strong>${escapeHtml(details.bankName || "-")}</strong></div>
+      <div><span>Account Name</span><strong>${escapeHtml(details.accountName || "-")}</strong></div>
+      <div><span>Account Number</span><strong>${escapeHtml(details.accountNumber || "-")}</strong></div>
+      <div class="checkout-summary-row full"><span>SWIFT Code</span><strong>${escapeHtml(details.swiftCode || "-")}</strong></div>
+    `
+    : bankTransferAccount.currency === "EUR"
+      ? `
+        <div class="checkout-summary-row full"><span>Bank Name</span><strong>${escapeHtml(details.bankName || "-")}</strong></div>
+        <div><span>Account Name</span><strong>${escapeHtml(details.accountName || "-")}</strong></div>
+        <div class="checkout-summary-row full"><span>IBAN</span><strong>${escapeHtml(details.iban || "-")}</strong></div>
+      `
+      : `
+        <div class="checkout-summary-row full"><span>Bank Name</span><strong>${escapeHtml(details.bankName || "-")}</strong></div>
+        <div><span>Account Name</span><strong>${escapeHtml(details.accountName || "-")}</strong></div>
+        <div><span>Account Number</span><strong>${escapeHtml(details.accountNumber || "-")}</strong></div>
+        <div><span>Sort Code</span><strong>${escapeHtml(details.sortCode || "-")}</strong></div>
+      `;
+
+  bankTransferPanel.innerHTML = `
+    <div class="checkout-note-box bank-transfer-box">
+      <strong>Bank Transfer Instructions</strong>
+      <p>Send your payment to the ${escapeHtml(bankTransferAccount.providerName)} receiving account below.</p>
+      <div class="checkout-summary-facts compact">
+        <div><span>Order Number</span><strong>${escapeHtml(currentOrder.orderNumber || currentOrder.orderId || currentOrder.id || "-")}</strong></div>
+        <div><span>Amount</span><strong>${escapeHtml(currentOrder.totalAmount || currentOrder.subtotal || "$0.00")}</strong></div>
+        <div><span>Currency</span><strong>${escapeHtml(bankTransferAccount.currency)}</strong></div>
+        <div><span>Settlement Channel</span><strong>${escapeHtml(bankTransferAccount.providerName)}</strong></div>
+        ${detailRows}
+      </div>
+    </div>
+    ${
+      paymentId
+        ? `
+          <div class="checkout-note-box bank-transfer-proof-box">
+            <strong>Submit Payment Proof</strong>
+            <p>Upload your transfer receipt and add the transaction reference so our team can confirm the payment.</p>
+            <input type="hidden" name="bankTransferPaymentId" value="${escapeHtml(paymentId)}">
+            <div class="form-grid bank-transfer-proof-grid">
+              <label>
+                Transaction Reference
+                <input type="text" name="transactionReference" value="${escapeHtml(transactionReference)}" placeholder="Reference shown on your transfer receipt" required>
+              </label>
+              <label>
+                Upload Payment Proof
+                <input type="file" name="paymentProof" accept="image/png,image/jpeg,image/webp" ${proofUrl ? "" : "required"}>
+              </label>
+            </div>
+            ${
+              proofUrl
+                ? `<p class="bank-transfer-proof-link">Current proof: <a href="${escapeHtml(proofUrl)}" target="_blank" rel="noreferrer">View uploaded proof</a></p>`
+                : ""
+            }
+          </div>
+        `
+        : `
+          <div class="checkout-note-box bank-transfer-proof-box">
+            <strong>Next Step</strong>
+            <p>Confirm the bank transfer method first. After the payment record is created, this page will let you upload your proof.</p>
+          </div>
+        `
+    }
+  `;
 };
 
 const renderProductSummary = (product, order) => {
@@ -409,13 +608,56 @@ const setupPaymentForm = () => {
       }
 
       const formData = new FormData(paymentForm);
-      const paymentMethod = String(formData.get("paymentMethod") || "").trim();
+      const paymentMethod = String(formData.get("paymentMethod") || getSelectedPaymentMethod() || "").trim();
+      const activeBankTransferPayment = getPendingBankTransferPayment(currentPayments);
 
       if (!paymentMethod) {
         throw new Error("No payment method selected.");
       }
 
-      if (currentOrder.purchaseMode === "retail") {
+      if (activeBankTransferPayment && !isPaidStatus(activeBankTransferPayment.status)) {
+        const paymentId = String(formData.get("bankTransferPaymentId") || activeBankTransferPayment.id || "").trim();
+        const transactionReference = String(formData.get("transactionReference") || "").trim();
+        const paymentProof = formData.get("paymentProof");
+
+        if (!paymentId) {
+          throw new Error("Bank transfer payment record is missing.");
+        }
+
+        if (!(paymentProof instanceof File) || !paymentProof.size) {
+          if (!String(activeBankTransferPayment.paymentProofUrl || "").trim()) {
+            throw new Error("Please upload your payment proof image.");
+          }
+        }
+
+        if (!transactionReference) {
+          throw new Error("Please enter the bank transaction reference.");
+        }
+
+        const uploadFormData = new FormData();
+        uploadFormData.set("paymentId", paymentId);
+        uploadFormData.set("transactionReference", transactionReference);
+        if (paymentProof instanceof File && paymentProof.size) {
+          uploadFormData.set("file", paymentProof);
+        }
+
+        const proofPayload = await requestForm(
+          `/api/orders/${encodeURIComponent(currentOrder.id)}/bank-transfer-proof`,
+          uploadFormData,
+          { method: "POST" }
+        );
+        currentPayments = await fetchOrderPayments(currentOrder.id);
+        renderBankTransferPanel();
+        if (paymentStatus) {
+          paymentStatus.textContent = proofPayload?.payment?.paymentProofUrl
+            ? "Bank transfer proof submitted. Our team will review it shortly."
+            : "Bank transfer details updated.";
+        }
+        setSubmitButtonState();
+        return;
+      }
+
+      if (currentOrder.purchaseMode === "retail" && !isBankTransferMethod(paymentMethod)) {
         const payload = await requestJson("/api/paypal/create-order", {
           method: "POST",
           body: JSON.stringify({
@@ -457,10 +699,15 @@ const setupPaymentForm = () => {
       currentPayments = await fetchOrderPayments(currentOrder.id);
 
       if (paymentStatus) {
-        paymentStatus.textContent = `${getPaymentTypeLabel(paymentRecord.paymentType)} record created. The order remains pending until manual confirmation.`;
+        paymentStatus.textContent = isBankTransferMethod(paymentMethod)
+          ? "Bank transfer payment record created. Upload your payment proof to notify our team."
+          : `${getPaymentTypeLabel(paymentRecord.paymentType)} record created. The order remains pending until manual confirmation.`;
       }
 
-      renderPaymentMethods(currentOrder.purchaseMode || "retail", paymentMethod);
+      renderPaymentMethods(currentOrder.purchaseMode || "retail", paymentMethod, {
+        lockedMethod: isBankTransferPayment(paymentRecord) ? "Bank Transfer" : "",
+      });
+      renderBankTransferPanel();
       setSubmitButtonState();
     } catch (error) {
       console.error("Payment method update failed:", error);
@@ -585,6 +832,7 @@ const initPaymentPage = async () => {
 
   document.title = `Payment | ${website?.brand?.name || "AvelixLink"}`;
   currentPayments = await fetchOrderPayments(currentOrder.id);
+  const activeBankTransferPayment = getPendingBankTransferPayment(currentPayments);
   if (backLink) {
     backLink.href = buildCheckoutUrl(currentOrder);
   }
@@ -592,7 +840,10 @@ const initPaymentPage = async () => {
   renderProductSummary(currentProduct, currentOrder);
   renderTotals(currentOrder);
   renderBuyerDetails(currentOrder);
-  renderPaymentMethods(currentOrder.purchaseMode || "retail", currentOrder.paymentMethod || "");
+  renderPaymentMethods(currentOrder.purchaseMode || "retail", activeBankTransferPayment?.paymentMethod || currentOrder.paymentMethod || "", {
+    lockedMethod: activeBankTransferPayment ? "Bank Transfer" : "",
+  });
+  renderBankTransferPanel();
   setSubmitButtonState();
   await handlePayPalReturnState();
 };
@@ -600,6 +851,10 @@ const initPaymentPage = async () => {
 setupNavigation();
 setupRevealAnimations();
 setupPaymentForm();
+paymentMethodGrid?.addEventListener("change", () => {
+  renderBankTransferPanel();
+  setSubmitButtonState();
+});
 syncNavbarState();
 window.addEventListener("scroll", syncNavbarState, { passive: true });
 initPaymentPage();

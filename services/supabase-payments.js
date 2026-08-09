@@ -138,6 +138,7 @@ const mapPaymentRow = (row) => ({
   providerReference: String(row?.provider_reference || "").trim(),
   paypalOrderId: String(row?.paypal_order_id || "").trim(),
   paypalCaptureId: String(row?.paypal_capture_id || "").trim(),
+  paymentProofUrl: String(row?.payment_proof_url || "").trim(),
   note: String(row?.note || "").trim(),
   status: String(row?.status || "pending")
     .trim()
@@ -285,6 +286,7 @@ const createPaymentForOrder = async (orderId, input) => {
     payment_type: paymentType,
     payment_method: paymentMethod,
     payment_provider: String(input?.paymentProvider || "").trim() || null,
+    settlement_channel: String(input?.settlementChannel || "").trim() || null,
     amount,
     currency: String(order.currency || input?.currency || "USD").trim().toUpperCase(),
     deposit_amount: depositAmount,
@@ -296,6 +298,7 @@ const createPaymentForOrder = async (orderId, input) => {
     provider_reference: String(input?.providerReference || "").trim() || null,
     paypal_order_id: String(input?.paypalOrderId || "").trim() || null,
     paypal_capture_id: String(input?.paypalCaptureId || "").trim() || null,
+    payment_proof_url: String(input?.paymentProofUrl || "").trim() || null,
     note: String(input?.note || "").trim() || null,
     status: normalizePaymentStatus(input?.status || "pending"),
     created_at: nowIso(),
@@ -313,11 +316,13 @@ const createPaymentForOrder = async (orderId, input) => {
     });
   } catch (error) {
     const message = String(error?.message || "");
-    if (/payment_provider|transaction_id|paypal_order_id|paypal_capture_id|provider_reference|note/i.test(message)) {
+    if (/payment_provider|settlement_channel|transaction_id|paypal_order_id|paypal_capture_id|payment_proof_url|provider_reference|note/i.test(message)) {
       delete insertPayload.payment_provider;
+      delete insertPayload.settlement_channel;
       delete insertPayload.transaction_id;
       delete insertPayload.paypal_order_id;
       delete insertPayload.paypal_capture_id;
+      delete insertPayload.payment_proof_url;
       delete insertPayload.provider_reference;
       delete insertPayload.note;
       createdRows = await requestSupabase("payments", {
@@ -397,6 +402,10 @@ const updatePayment = async (paymentId, partial, options = {}) => {
     patch.provider_reference = String(partial.providerReference || "").trim() || null;
   }
 
+  if (partial?.settlementChannel !== undefined) {
+    patch.settlement_channel = String(partial.settlementChannel || "").trim() || null;
+  }
+
   if (partial?.transactionId !== undefined) {
     patch.transaction_id = String(partial.transactionId || "").trim() || null;
   }
@@ -411,6 +420,10 @@ const updatePayment = async (paymentId, partial, options = {}) => {
 
   if (partial?.paypalCaptureId !== undefined) {
     patch.paypal_capture_id = String(partial.paypalCaptureId || "").trim() || null;
+  }
+
+  if (partial?.paymentProofUrl !== undefined) {
+    patch.payment_proof_url = String(partial.paymentProofUrl || "").trim() || null;
   }
 
   if (partial?.note !== undefined) {
@@ -433,11 +446,13 @@ const updatePayment = async (paymentId, partial, options = {}) => {
     });
   } catch (error) {
     const message = String(error?.message || "");
-    if (/payment_provider|transaction_id|paypal_order_id|paypal_capture_id|provider_reference|note/i.test(message)) {
+    if (/payment_provider|settlement_channel|transaction_id|paypal_order_id|paypal_capture_id|payment_proof_url|provider_reference|note/i.test(message)) {
       delete patch.payment_provider;
+      delete patch.settlement_channel;
       delete patch.transaction_id;
       delete patch.paypal_order_id;
       delete patch.paypal_capture_id;
+      delete patch.payment_proof_url;
       delete patch.provider_reference;
       delete patch.note;
       updatedRows = await requestSupabase(`payments?id=eq.${escapeFilterValue(normalizedPaymentId)}`, {

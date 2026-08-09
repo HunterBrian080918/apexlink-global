@@ -22,6 +22,7 @@ const FOLDER_MAP = {
   homepage_hero: "apexlink/homepage",
   about: "apexlink/about",
   support: "apexlink/support",
+  payment_proof: "apexlink/payments",
   misc: "apexlink/misc",
 };
 

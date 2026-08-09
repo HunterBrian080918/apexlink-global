@@ -1,16 +1,84 @@
 const STORAGE_KEY = "northstar-platform-store-v1";
 
+const NAV_GROUP_STORAGE_KEY = "avelix-admin-nav-groups-v1";
+const navStructure = {
+  standalone: [
+    { id: "dashboard", label: "Dashboard", title: "Data Overview", icon: "D" },
+  ],
+  groups: [
+    {
+      id: "commerce",
+      label: "Commerce",
+      icon: "C",
+      items: [
+        { id: "orders", label: "Orders", title: "Order Management", icon: "O" },
+        { id: "payments", label: "Payments", title: "Payment Records", icon: "P" },
+        { id: "products", label: "Products", title: "Product Catalog", icon: "G" },
+        { id: "inventory", label: "Inventory", title: "Inventory", icon: "I", future: true },
+      ],
+    },
+    {
+      id: "customers-group",
+      label: "Customers",
+      icon: "U",
+      items: [
+        { id: "customers", label: "Customers", title: "Customer Records", icon: "C" },
+        { id: "support", label: "Support", title: "Customer Support", icon: "S" },
+      ],
+    },
+    {
+      id: "content",
+      label: "Content",
+      icon: "T",
+      items: [
+        { id: "media", label: "Media", title: "Media Library", icon: "M" },
+        { id: "website-pages", label: "Website Pages", title: "Website Pages", icon: "W" },
+        { id: "seo", label: "SEO", title: "SEO Settings", icon: "E" },
+      ],
+    },
+    {
+      id: "settings-group",
+      label: "Settings",
+      icon: "S",
+      items: [
+        { id: "general-settings", label: "General Settings", title: "General Settings", icon: "G" },
+        { id: "payment-settings", label: "Payment Settings", title: "Payment Settings", icon: "$" },
+        { id: "shipping-settings", label: "Shipping Settings", title: "Shipping Settings", icon: "H" },
+        { id: "account-settings", label: "Account Settings", title: "Account Settings", icon: "A" },
+      ],
+    },
+    {
+      id: "storefront-group",
+      label: "Storefront",
+      icon: "L",
+      items: [
+        { id: "storefront", label: "Open Storefront", title: "Open Storefront", icon: "L", href: "/", external: true },
+      ],
+    },
+  ],
+};
 const navItems = [
-  { id: "dashboard", label: "Dashboard", title: "Data Overview" },
-  { id: "orders", label: "Orders", title: "Inquiry Management" },
-  { id: "payments", label: "Payments", title: "Payment Records" },
-  { id: "products", label: "Products", title: "Product Catalog" },
-  { id: "media", label: "Media", title: "Media Library" },
-  { id: "customers", label: "Customers", title: "Customer Support" },
-  { id: "website", label: "Website", title: "Website Management" },
-  { id: "settings", label: "Settings", title: "System Settings" },
-  { id: "storefront", label: "Open Storefront", href: "/", external: true },
+  ...navStructure.standalone,
+  ...navStructure.groups.flatMap((group) => group.items),
 ];
+const navItemRegistry = navItems.reduce((accumulator, item) => {
+  accumulator[item.id] = item;
+  return accumulator;
+}, {});
+const navItemToGroup = navStructure.groups.reduce((accumulator, group) => {
+  group.items.forEach((item) => {
+    accumulator[item.id] = group.id;
+  });
+  return accumulator;
+}, {});
+const loadNavGroupState = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NAV_GROUP_STORAGE_KEY) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+};
 const productEditorTabs = [
   { id: "basic", label: "Basic" },
   { id: "media", label: "Media" },
@@ -23,6 +91,9 @@ const productEditorTabs = [
 const adminState = {
   activeSection: "dashboard",
   theme: localStorage.getItem("northstar-admin-theme") || "light",
+  nav: {
+    expandedGroups: loadNavGroupState(),
+  },
   dashboard: {
     revenueRange: 7,
   },
@@ -746,12 +817,18 @@ const formatPaymentProviderLabel = (provider, method = "") => {
   if (normalized === "paypal") {
     return "PayPal";
   }
-  return normalized.replace(/\b\w/g, (part) => part.toUpperCase());
+  if (normalized === "bank_transfer") {
+    return "Bank Transfer";
+  }
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (part) => part.toUpperCase());
 };
 const STATUS_LABEL_CONFIG = {
   unprocessed: "Unprocessed",
   processed: "Processed",
   pending_payment: "Pending Payment",
+  awaiting_payment: "Awaiting Payment",
   inquiry_received: "Inquiry Received",
   quote_pending: "Quote Pending",
   awaiting_confirmation: "Awaiting Confirmation",
@@ -763,6 +840,7 @@ const STATUS_LABEL_CONFIG = {
   not_started: "Not Started",
   in_transit: "In Transit",
   deposit_paid: "Deposit Paid",
+  payment_submitted: "Payment Submitted",
   partially_paid: "Partially Paid",
   partially_refunded: "Partially Refunded",
 };
@@ -787,7 +865,16 @@ const formatProductStatusLabel = (value) => {
   return formatStatusLabel(normalized);
 };
 const INTERNAL_ORDER_STATUSES = ["unprocessed", "processed"];
-const RETAIL_ORDER_STATUSES = ["pending_payment", "paid", "processing", "shipped", "delivered", "completed", "cancelled"];
+const RETAIL_ORDER_STATUSES = [
+  "pending_payment",
+  "awaiting_payment",
+  "paid",
+  "processing",
+  "shipped",
+  "delivered",
+  "completed",
+  "cancelled",
+];
 const WHOLESALE_ORDER_STATUSES = [
   "inquiry_received",
   "quote_pending",
@@ -812,6 +899,8 @@ const SUPPORT_CONVERSATION_TYPES = [
 const PAYMENT_STATUSES = [
   "unpaid",
   "pending",
+  "awaiting_payment",
+  "payment_submitted",
   "deposit_paid",
   "partially_paid",
   "paid",
@@ -821,6 +910,31 @@ const PAYMENT_STATUSES = [
   "cancelled",
 ];
 const SHIPPING_STATUSES = ["not_started", "preparing", "packed", "shipped", "in_transit", "delivered", "exception"];
+const ADMIN_PAYMENT_METHOD_OPTIONS = [
+  {
+    id: "paypal",
+    label: "PayPal",
+    description: "Accept payments through PayPal Checkout",
+  },
+  {
+    id: "bank-transfer",
+    label: "Bank Transfer",
+    description: "Receive international wire payments",
+  },
+  {
+    id: "wise",
+    label: "Wise",
+    description: "Accept Wise payments",
+  },
+  {
+    id: "credit-card",
+    label: "Credit Card",
+    description: "Future card payment integration",
+  },
+];
+const isBankTransferPaymentRecord = (payment) =>
+  String(payment?.paymentProvider || "").trim().toLowerCase() === "bank_transfer" ||
+  String(payment?.paymentMethod || "").trim().toLowerCase() === "bank transfer";
 const PAYMENT_FILTER_OPTIONS = [
   { value: "all", label: "All" },
   { value: "pending", label: "Pending" },
@@ -839,15 +953,90 @@ const normalizeStatusValue = (value) =>
     .replace(/\s+/g, "_")
     .replace(/-+/g, "_");
 
+const normalizePaymentMethodName = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+
+const getEnabledPaymentMethods = (methods) => {
+  const seen = new Set();
+  return (Array.isArray(methods) ? methods : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const normalized = normalizePaymentMethodName(item);
+      if (!normalized || seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+};
+
+const persistNavGroupState = () => {
+  localStorage.setItem(NAV_GROUP_STORAGE_KEY, JSON.stringify(adminState.nav.expandedGroups || {}));
+};
+
+const getSectionRenderTarget = (section) => {
+  const normalized = String(section || "").trim().toLowerCase();
+  if (normalized === "order") {
+    return "order";
+  }
+  if (["support", "customers"].includes(normalized)) {
+    return "customers";
+  }
+  if (["website-pages", "seo", "website"].includes(normalized)) {
+    return "website";
+  }
+  if (["general-settings", "payment-settings", "shipping-settings", "account-settings", "settings"].includes(normalized)) {
+    return "settings";
+  }
+  return normalized;
+};
+
+const isNavGroupExpanded = (groupId, activeSection = getAdminActiveNavSection()) => {
+  if (Object.prototype.hasOwnProperty.call(adminState.nav.expandedGroups || {}, groupId)) {
+    return Boolean(adminState.nav.expandedGroups[groupId]) || navItemToGroup[activeSection] === groupId;
+  }
+
+  return navItemToGroup[activeSection] === groupId;
+};
+
+const setNavGroupExpanded = (groupId, isExpanded) => {
+  adminState.nav.expandedGroups = {
+    ...(adminState.nav.expandedGroups || {}),
+    [groupId]: Boolean(isExpanded),
+  };
+  persistNavGroupState();
+};
+
 const normalizeAdminSection = (value) => {
   const nextSection = String(value || "").trim().toLowerCase();
   if (nextSection === "order") {
     return "order";
   }
-  return navItems.some((item) => item.id === nextSection && !item.href) ? nextSection : "dashboard";
+  if (nextSection === "website") {
+    return "website-pages";
+  }
+  if (nextSection === "settings") {
+    return "general-settings";
+  }
+  return navItems.some((item) => item.id === nextSection && !item.href && !item.future) ? nextSection : "dashboard";
 };
 
-const getAdminActiveNavSection = () => (adminState.activeSection === "order" ? "orders" : adminState.activeSection);
+const getAdminActiveNavSection = () => {
+  if (adminState.activeSection === "order") {
+    return "orders";
+  }
+  if (adminState.activeSection === "website") {
+    return "website-pages";
+  }
+  if (adminState.activeSection === "settings") {
+    return "general-settings";
+  }
+  return adminState.activeSection;
+};
 
 const getOrderListStatusLabel = (order) => {
   const orderStatus = normalizeStatusValue(order?.orderStatus);
@@ -1495,30 +1684,91 @@ const deriveOrderPaymentStatusFromPayments = (order, payments) => {
 
 const renderNav = () => {
   const activeNavSection = getAdminActiveNavSection();
-  navRoot.innerHTML = navItems
+  const standaloneMarkup = navStructure.standalone
     .map(
-      (item) =>
-        item.href
-          ? `
-            <a
-              class="admin-nav-button admin-nav-link"
-              href="${escapeHtml(item.href)}"
-              ${item.external ? 'target="_blank" rel="noreferrer"' : ""}
-            >
-              <span>${escapeHtml(item.label)}</span>
-            </a>
-          `
-          : `
-            <button
-              type="button"
-              class="admin-nav-button ${activeNavSection === item.id ? "is-active" : ""}"
-              data-section="${item.id}"
-            >
-              <span>${escapeHtml(item.label)}</span>
-            </button>
-          `
+      (item) =>         `
+        <button
+          type="button"
+          class="admin-nav-button admin-nav-item ${activeNavSection === item.id ? "is-active" : ""}"
+          data-section="${item.id}"
+          title="${escapeHtml(item.label)}"
+        >
+          <span class="admin-nav-icon" aria-hidden="true">${escapeHtml(item.icon || "•")}</span>
+          <span class="admin-nav-text">${escapeHtml(item.label)}</span>
+        </button>
+      `
     )
     .join("");
+
+  const groupMarkup = navStructure.groups
+    .map((group) => {
+      const expanded = isNavGroupExpanded(group.id, activeNavSection);
+      const hasActiveItem = group.items.some((item) => item.id === activeNavSection);
+
+      return `
+        <section class="admin-nav-group ${expanded ? "is-expanded" : ""} ${hasActiveItem ? "is-active-group" : ""}" data-group="${group.id}">
+          <button
+            type="button"
+            class="admin-nav-group-toggle"
+            data-nav-group-toggle="${group.id}"
+            aria-expanded="${expanded ? "true" : "false"}"
+            title="${escapeHtml(group.label)}"
+          >
+            <span class="admin-nav-group-main">
+              <span class="admin-nav-icon" aria-hidden="true">${escapeHtml(group.icon || "•")}</span>
+              <span class="admin-nav-text">${escapeHtml(group.label)}</span>
+            </span>
+            <span class="admin-nav-chevron" aria-hidden="true">⌄</span>
+          </button>
+          <div class="admin-nav-group-items">
+            ${group.items
+              .map((item) => {
+                if (item.future) {
+                  return `
+                    <span
+                      class="admin-nav-button admin-nav-item admin-nav-item-child is-future"
+                      title="${escapeHtml(`${item.label} (Future)`)}"
+                    >
+                      <span class="admin-nav-icon" aria-hidden="true">${escapeHtml(item.icon || "•")}</span>
+                      <span class="admin-nav-text">${escapeHtml(item.label)}</span>
+                    </span>
+                  `;
+                }
+
+                if (item.href) {
+                  return `
+                    <a
+                      class="admin-nav-button admin-nav-link admin-nav-item admin-nav-item-child"
+                      href="${escapeHtml(item.href)}"
+                      ${item.external ? 'target="_blank" rel="noreferrer"' : ""}
+                      title="${escapeHtml(item.label)}"
+                    >
+                      <span class="admin-nav-icon" aria-hidden="true">${escapeHtml(item.icon || "•")}</span>
+                      <span class="admin-nav-text">${escapeHtml(item.label)}</span>
+                    </a>
+                  `;
+                }
+
+                return `
+                  <button
+                    type="button"
+                    class="admin-nav-button admin-nav-item admin-nav-item-child ${activeNavSection === item.id ? "is-active" : ""}"
+                    data-section="${item.id}"
+                    title="${escapeHtml(item.label)}"
+                  >
+                    <span class="admin-nav-icon" aria-hidden="true">${escapeHtml(item.icon || "•")}</span>
+                    <span class="admin-nav-text">${escapeHtml(item.label)}</span>
+                  </button>
+                `;
+              })
+              .join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  navRoot.innerHTML = `${standaloneMarkup}${groupMarkup}`;
 };
 
 const openAdminOrderDetail = async (orderId, routeMode = "push") => {
@@ -1536,7 +1786,7 @@ const openAdminOrderDetail = async (orderId, routeMode = "push") => {
 };
 
 const updateTitle = () => {
-  const current = navItems.find((item) => item.id === getAdminActiveNavSection()) || navItems[0];
+  const current = navItemRegistry[getAdminActiveNavSection()] || navStructure.standalone[0];
   sectionLabel.textContent = current.label;
 
   if (adminState.activeSection === "order") {
@@ -3298,7 +3548,13 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
           image: selected.productImage || selected.image || "",
         },
       ];
-  const primaryPayment = Array.isArray(selectedPayments) && selectedPayments.length ? selectedPayments[0] : null;
+  const primaryPayment = Array.isArray(selectedPayments) && selectedPayments.length
+    ? selectedPayments
+        .slice()
+        .reverse()
+        .find((payment) => payment.paymentType !== "refund" && ["pending", "awaiting_payment", "payment_submitted"].includes(normalizeStatusValue(payment.status)))
+        || selectedPayments[0]
+    : null;
 
   return `
     <div class="admin-stack">
@@ -3464,10 +3720,26 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
                   formatPaymentProviderLabel(primaryPayment?.paymentProvider, primaryPayment?.paymentMethod)
                 )}</dd></div>
                 <div><dt>Payment Method</dt><dd>${escapeHtml(primaryPayment?.paymentMethod || "-")}</dd></div>
+                <div><dt>Settlement Channel</dt><dd>${escapeHtml(primaryPayment?.settlementChannel || "-")}</dd></div>
                 <div><dt>Transaction ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(
                   primaryPayment?.transactionId || primaryPayment?.paypalCaptureId || primaryPayment?.providerReference || primaryPayment?.paymentId || primaryPayment?.id || "-"
                 )}</dd></div>
+                <div><dt>Bank Reference</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(
+                  primaryPayment?.transactionId || primaryPayment?.providerReference || "-"
+                )}</dd></div>
                 <div><dt>PayPal Order ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(primaryPayment?.paypalOrderId || "-")}</dd></div>
+                <div class="full"><dt>Payment Proof</dt><dd>${
+                  primaryPayment?.paymentProofUrl
+                    ? `
+                      <div class="admin-payment-proof-preview">
+                        <a href="${escapeHtml(primaryPayment.paymentProofUrl)}" target="_blank" rel="noreferrer">
+                          <img src="${escapeHtml(primaryPayment.paymentProofUrl)}" alt="Payment proof preview">
+                        </a>
+                        <a href="${escapeHtml(primaryPayment.paymentProofUrl)}" target="_blank" rel="noreferrer">Open full image</a>
+                      </div>
+                    `
+                    : "-"
+                }</dd></div>
                 <div><dt>Payment Time</dt><dd>${escapeHtml(primaryPayment?.paidAt ? formatDate(primaryPayment.paidAt) : "-")}</dd></div>
                 <div><dt>Amount</dt><dd>${escapeHtml(
                   primaryPayment ? formatMoney(primaryPayment.amount, primaryPayment.currency) : selected.totalAmount || selected.subtotal || "-"
@@ -3487,6 +3759,14 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
               </dl>
               <div class="admin-actions-inline">
                 <button class="admin-secondary-button" type="submit">Save Payment Status</button>
+                ${
+                  primaryPayment?.id && isBankTransferPaymentRecord(primaryPayment)
+                    ? `
+                      <button class="admin-primary-button" type="button" id="order-confirm-bank-transfer-button">Confirm Payment</button>
+                      <button class="admin-secondary-button" type="button" id="order-reject-bank-transfer-button">Reject Payment</button>
+                    `
+                    : ""
+                }
               </div>
             </article>
             <article class="admin-info-card">
@@ -3647,6 +3927,49 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
 };
 
 const bindOrderDetailInteractions = (selected) => {
+  const reviewBankTransferPayment = async (nextStatus) => {
+    if (!selected?.id) {
+      return;
+    }
+
+    const payments = await fetchAdminOrderPayments(selected.id);
+    const primaryPayment = Array.isArray(payments) && payments.length
+      ? payments
+          .slice()
+          .reverse()
+          .find((payment) => isBankTransferPaymentRecord(payment) && !["paid", "refunded", "cancelled"].includes(normalizeStatusValue(payment.status)))
+          || payments[0]
+      : null;
+
+    if (!primaryPayment?.id || !isBankTransferPaymentRecord(primaryPayment)) {
+      window.alert("No bank transfer payment record was found for this order.");
+      return;
+    }
+
+    await updateAdminPayment(primaryPayment.id, {
+      status: nextStatus,
+      paymentMethod: "Bank Transfer",
+      paymentProvider: "bank_transfer",
+    });
+
+    await updateAdminOrder(
+      selected.id,
+      nextStatus === "paid"
+        ? {
+            paymentMethod: "Bank Transfer",
+            paymentStatus: "paid",
+            orderStatus: "processing",
+          }
+        : {
+            paymentMethod: "Bank Transfer",
+            paymentStatus: "failed",
+          }
+    );
+
+    await loadAdminOrderTimeline(selected.id);
+    await renderCurrentSection();
+  };
+
   document.querySelector("#order-back-button")?.addEventListener("click", async () => {
     adminState.activeSection = "orders";
     syncAdminRoute("push");
@@ -3738,6 +4061,14 @@ const bindOrderDetailInteractions = (selected) => {
     adminState.payments.orderFilterId = selected.id;
     syncAdminRoute("push");
     await renderCurrentSection();
+  });
+
+  document.querySelector("#order-confirm-bank-transfer-button")?.addEventListener("click", async () => {
+    await reviewBankTransferPayment("paid");
+  });
+
+  document.querySelector("#order-reject-bank-transfer-button")?.addEventListener("click", async () => {
+    await reviewBankTransferPayment("failed");
   });
 };
 
@@ -7635,6 +7966,12 @@ const renderWebsiteSection = async () => {
 
 const renderSettingsSection = async () => {
   const settings = await window.NorthstarStore.getSettings();
+  const enabledPaymentMethods = getEnabledPaymentMethods(settings.paymentMethods || ["PayPal", "Bank Transfer"]);
+  const enabledPaymentKeys = new Set(enabledPaymentMethods.map(normalizePaymentMethodName));
+  const bankTransfer = settings.bankTransferSettings || {};
+  const usd = bankTransfer.usd || {};
+  const eur = bankTransfer.eur || {};
+  const gbp = bankTransfer.gbp || {};
 
   contentRoot.innerHTML = `
     <form class="admin-form-stack" id="settings-form">
@@ -7665,17 +8002,120 @@ const renderSettingsSection = async () => {
         <section class="admin-panel">
           <div class="admin-panel-header">
             <div>
-              <h3>Payments and Locale</h3>
-              <p>Payment methods, language, and theme color.</p>
+              <h3>Payment Methods</h3>
+              <p>Enable only the payment providers that should appear across checkout and payment flows.</p>
+            </div>
+          </div>
+          <div class="admin-payment-method-grid">
+            ${ADMIN_PAYMENT_METHOD_OPTIONS.map(
+              (method) => `
+                <label class="admin-payment-method-card">
+                  <input
+                    type="checkbox"
+                    name="paymentMethods"
+                    value="${escapeHtml(method.label)}"
+                    ${enabledPaymentKeys.has(normalizePaymentMethodName(method.label)) ? "checked" : ""}
+                  >
+                  <div class="admin-payment-method-card-head">
+                    <div class="admin-payment-method-copy">
+                      <h4>${escapeHtml(method.label)}</h4>
+                      <p>${escapeHtml(method.description)}</p>
+                    </div>
+                    <span class="admin-switch" aria-hidden="true">
+                      <span class="admin-switch-track"></span>
+                      <span class="admin-switch-thumb"></span>
+                    </span>
+                  </div>
+                </label>
+              `
+            ).join("")}
+          </div>
+        </section>
+
+        <section class="admin-panel">
+          <div class="admin-panel-header">
+            <div>
+              <h3>Bank Transfer Accounts</h3>
+              <p>Receiving account details displayed to customers on the payment page.</p>
+            </div>
+          </div>
+          <div class="admin-payment-account-grid">
+            <article class="admin-payment-account-card">
+              <div class="admin-payment-account-head">
+                <h4>USD Account</h4>
+              </div>
+              <div class="admin-form-grid">
+                <label>
+                  Bank Name
+                  <input type="text" name="usdBankName" value="${escapeHtml(usd.bankName || "")}">
+                </label>
+                <label>
+                  Account Name
+                  <input type="text" name="usdAccountName" value="${escapeHtml(usd.accountName || "")}">
+                </label>
+                <label>
+                  Account Number
+                  <input type="text" name="usdAccountNumber" value="${escapeHtml(usd.accountNumber || "")}">
+                </label>
+                <label>
+                  SWIFT/BIC
+                  <input type="text" name="usdSwiftCode" value="${escapeHtml(usd.swiftCode || "")}">
+                </label>
+              </div>
+            </article>
+            <article class="admin-payment-account-card">
+              <div class="admin-payment-account-head">
+                <h4>EUR Account</h4>
+              </div>
+              <div class="admin-form-grid">
+                <label>
+                  Bank Name
+                  <input type="text" name="eurBankName" value="${escapeHtml(eur.bankName || "")}">
+                </label>
+                <label>
+                  Account Name
+                  <input type="text" name="eurAccountName" value="${escapeHtml(eur.accountName || "")}">
+                </label>
+                <label class="full">
+                  IBAN
+                  <input type="text" name="eurIban" value="${escapeHtml(eur.iban || "")}">
+                </label>
+              </div>
+            </article>
+            <article class="admin-payment-account-card">
+              <div class="admin-payment-account-head">
+                <h4>GBP Account</h4>
+              </div>
+              <div class="admin-form-grid">
+                <label>
+                  Bank Name
+                  <input type="text" name="gbpBankName" value="${escapeHtml(gbp.bankName || "")}">
+                </label>
+                <label>
+                  Account Name
+                  <input type="text" name="gbpAccountName" value="${escapeHtml(gbp.accountName || "")}">
+                </label>
+                <label>
+                  Account Number
+                  <input type="text" name="gbpAccountNumber" value="${escapeHtml(gbp.accountNumber || "")}">
+                </label>
+                <label>
+                  Sort Code
+                  <input type="text" name="gbpSortCode" value="${escapeHtml(gbp.sortCode || "")}">
+                </label>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="admin-panel">
+          <div class="admin-panel-header">
+            <div>
+              <h3>Locale and Theme</h3>
+              <p>Language and theme color used across the admin and storefront shell.</p>
             </div>
           </div>
           <div class="admin-form-grid">
-            <label class="full">
-              Payment Methods
-              <textarea name="paymentMethods" rows="5">${escapeHtml(
-                toTextareaValue(settings.paymentMethods || [])
-              )}</textarea>
-            </label>
             <label>
               Website Language
               <input type="text" name="language" value="${escapeHtml(settings.language || "")}">
@@ -7725,14 +8165,35 @@ const renderSettingsSection = async () => {
     }
 
     try {
+      const selectedPaymentMethods = getEnabledPaymentMethods(formData.getAll("paymentMethods"));
       const updatedSettings = await window.NorthstarStore.updateSettings({
         adminEmail: formData.get("adminEmail"),
         adminPassword: formData.get("adminPassword"),
         recoveryEmail: formData.get("recoveryEmail"),
-        paymentMethods: parseTextList(formData.get("paymentMethods")),
+        paymentMethods: selectedPaymentMethods,
         language: formData.get("language"),
         themeColor: formData.get("themeColor"),
         systemConfig: formData.get("systemConfig"),
+        bankTransferSettings: {
+          providerName: String(bankTransfer.providerName || "").trim(),
+          usd: {
+            bankName: formData.get("usdBankName"),
+            accountName: formData.get("usdAccountName"),
+            accountNumber: formData.get("usdAccountNumber"),
+            swiftCode: formData.get("usdSwiftCode"),
+          },
+          eur: {
+            bankName: formData.get("eurBankName"),
+            accountName: formData.get("eurAccountName"),
+            iban: formData.get("eurIban"),
+          },
+          gbp: {
+            bankName: formData.get("gbpBankName"),
+            accountName: formData.get("gbpAccountName"),
+            accountNumber: formData.get("gbpAccountNumber"),
+            sortCode: formData.get("gbpSortCode"),
+          },
+        },
       });
 
       if (updatedSettings?.reauthRequired) {
@@ -7778,42 +8239,44 @@ const renderCurrentSection = async () => {
   updateTitle();
   renderLoading();
 
-  if (adminState.activeSection === "dashboard") {
+  const sectionTarget = getSectionRenderTarget(adminState.activeSection);
+
+  if (sectionTarget === "dashboard") {
     await renderDashboardSectionV2();
     return;
   }
 
-  if (adminState.activeSection === "order") {
+  if (sectionTarget === "order") {
     await renderOrderDetailSection();
     return;
   }
 
-  if (adminState.activeSection === "orders") {
+  if (sectionTarget === "orders") {
     await renderOrdersSection();
     return;
   }
 
-  if (adminState.activeSection === "payments") {
+  if (sectionTarget === "payments") {
     await renderPaymentsSection();
     return;
   }
 
-  if (adminState.activeSection === "customers") {
+  if (sectionTarget === "customers") {
     await renderCustomersSection();
     return;
   }
 
-  if (adminState.activeSection === "products") {
+  if (sectionTarget === "products") {
     await renderProductsSection();
     return;
   }
 
-  if (adminState.activeSection === "media") {
+  if (sectionTarget === "media") {
     await renderMediaSection();
     return;
   }
 
-  if (adminState.activeSection === "website") {
+  if (sectionTarget === "website") {
     await renderWebsiteSection();
     return;
   }
@@ -7889,6 +8352,16 @@ loginForm?.addEventListener("submit", async (event) => {
 });
 
 navRoot?.addEventListener("click", async (event) => {
+  const groupToggle = event.target.closest("[data-nav-group-toggle]");
+  if (groupToggle) {
+    const groupId = String(groupToggle.getAttribute("data-nav-group-toggle") || "").trim();
+    if (groupId) {
+      setNavGroupExpanded(groupId, !isNavGroupExpanded(groupId));
+      renderNav();
+    }
+    return;
+  }
+
   const button = event.target.closest("[data-section]");
 
   if (!button) {
@@ -7902,17 +8375,18 @@ navRoot?.addEventListener("click", async (event) => {
   }
 
   adminState.activeSection = nextSection;
+  const nextSectionTarget = getSectionRenderTarget(nextSection);
 
-  if (nextSection === "orders") {
+  if (nextSectionTarget === "orders") {
     adminState.payments.orderFilterId = "";
   }
 
-  if (nextSection !== "products") {
+  if (nextSectionTarget !== "products") {
     adminState.products.mode = "list";
     adminState.products.editingId = null;
   }
 
-  if (nextSection !== "payments") {
+  if (nextSectionTarget !== "payments") {
     adminState.payments.mode = "list";
     adminState.payments.selectedId = null;
     adminState.payments.orderFilterId = "";

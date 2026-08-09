@@ -90,6 +90,7 @@ const toStatusLabel = (value, fallback = "-") =>
 
 const RETAIL_ORDER_STATUSES = new Set([
   "pending_payment",
+  "awaiting_payment",
   "paid",
   "processing",
   "shipped",

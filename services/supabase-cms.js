@@ -8,7 +8,13 @@ const SUPABASE_ADMIN_KEY = String(
 
 const defaultDataFile = path.join(__dirname, "..", "data", "default-data.json");
 const WEBSITE_SECTIONS = new Set(["brand", "hero", "footer", "contact", "social", "seo", "homepage"]);
-const APP_SETTING_SECTIONS = new Set(["paymentMethods", "language", "themeColor", "systemConfig"]);
+const APP_SETTING_SECTIONS = new Set([
+  "paymentMethods",
+  "language",
+  "themeColor",
+  "systemConfig",
+  "bankTransferSettings",
+]);
 const ALLOWED_SECTIONS = new Set([...WEBSITE_SECTIONS, ...APP_SETTING_SECTIONS]);
 const LOGO_FALLBACK_PATH = "/assets/brand/avelixlink-mark.png";
 const FAVICON_FALLBACK_PATH = "/assets/brand/avelixlink-favicon.png";
@@ -158,6 +164,27 @@ const serializeSystemConfigValue = (rawText, cms) => {
 
   return JSON.stringify(payload);
 };
+const normalizeBankTransferCurrency = (value, fields) => {
+  const source = asObject(value);
+  return fields.reduce((accumulator, field) => {
+    accumulator[field] = asText(source[field]);
+    return accumulator;
+  }, {});
+};
+const normalizeBankTransferSettings = (value) => {
+  const source = asObject(value);
+  return {
+    providerName: asText(source.providerName, "WorldFirst"),
+    usd: normalizeBankTransferCurrency(source.usd, [
+      "bankName",
+      "accountName",
+      "accountNumber",
+      "swiftCode",
+    ]),
+    eur: normalizeBankTransferCurrency(source.eur, ["bankName", "iban", "accountName"]),
+    gbp: normalizeBankTransferCurrency(source.gbp, ["bankName", "accountName", "accountNumber", "sortCode"]),
+  };
+};
 const asNullableText = (value) => {
   const normalized = String(value ?? "").trim();
   return normalized || null;
@@ -303,10 +330,11 @@ const buildDefaultSiteConfig = () => {
       aboutPoints: asStringArray(homepage.aboutPoints || []),
     },
     settings: {
-      paymentMethods: asStringArray(settings.paymentMethods || ["Credit Card", "PayPal", "Bank Transfer", "Wise"]),
+      paymentMethods: asStringArray(settings.paymentMethods || ["PayPal", "Bank Transfer"]),
       language: asText(settings.language, "English"),
       themeColor: asText(settings.themeColor, "#111827"),
       systemConfig: asText(settings.systemConfig),
+      bankTransferSettings: normalizeBankTransferSettings(settings.bankTransferSettings),
     },
   };
 };
@@ -336,6 +364,10 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
   const systemConfig = parseSystemConfigValue(appRow?.system_config);
   const homepageCms =
     systemConfig.cms?.homepage && typeof systemConfig.cms.homepage === "object" ? systemConfig.cms.homepage : {};
+  const bankTransferCms =
+    systemConfig.cms?.bankTransferSettings && typeof systemConfig.cms.bankTransferSettings === "object"
+      ? systemConfig.cms.bankTransferSettings
+      : {};
 
   return {
     website: {
@@ -403,6 +435,10 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
       language: asText(appRow?.language, defaults.settings.language),
       themeColor: asText(appRow?.theme_color, defaults.settings.themeColor),
       systemConfig: asText(systemConfig.rawText, defaults.settings.systemConfig),
+      bankTransferSettings: normalizeBankTransferSettings({
+        ...defaults.settings.bankTransferSettings,
+        ...bankTransferCms,
+      }),
     },
   };
 };
@@ -518,6 +554,12 @@ const serializeAppSettingsRow = (config, existingRow) => {
     nextCms.homepage && typeof nextCms.homepage === "object" && !Array.isArray(nextCms.homepage)
       ? { ...nextCms.homepage }
       : {};
+  const nextBankTransferCms =
+    nextCms.bankTransferSettings &&
+    typeof nextCms.bankTransferSettings === "object" &&
+    !Array.isArray(nextCms.bankTransferSettings)
+      ? { ...nextCms.bankTransferSettings }
+      : {};
   const homepageSubtitle = asNullableText(config?.homepage?.subtitle);
   const heroSubtitle = asNullableText(config?.website?.hero?.subtitle);
 
@@ -531,6 +573,21 @@ const serializeAppSettingsRow = (config, existingRow) => {
     nextCms.homepage = nextHomepageCms;
   } else {
     delete nextCms.homepage;
+  }
+
+  const normalizedBankTransferSettings = normalizeBankTransferSettings(config?.settings?.bankTransferSettings);
+  if (
+    Object.values(normalizedBankTransferSettings.usd).some(Boolean) ||
+    Object.values(normalizedBankTransferSettings.eur).some(Boolean) ||
+    Object.values(normalizedBankTransferSettings.gbp).some(Boolean) ||
+    normalizedBankTransferSettings.providerName
+  ) {
+    nextCms.bankTransferSettings = {
+      ...nextBankTransferCms,
+      ...normalizedBankTransferSettings,
+    };
+  } else {
+    delete nextCms.bankTransferSettings;
   }
 
   return {
@@ -608,7 +665,7 @@ const toPatchPayload = (input) => {
     patch.homepage = asObject(source.homepage);
   }
 
-  ["paymentMethods", "language", "themeColor", "systemConfig"].forEach((key) => {
+  ["paymentMethods", "language", "themeColor", "systemConfig", "bankTransferSettings"].forEach((key) => {
     if (source[key] !== undefined) {
       if (!patch.settings) {
         patch.settings = {};

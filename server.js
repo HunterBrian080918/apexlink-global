@@ -148,6 +148,13 @@ const getPayPalReturnUrl = (request, orderId, status = "success") => {
 };
 
 const isPaidStatus = (value) => String(value || "").trim().toLowerCase() === "paid";
+const WORLD_FIRST_SETTLEMENT_CHANNEL = "WorldFirst";
+const normalizePaymentMethodKey = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+const isBankTransferMethod = (value) => normalizePaymentMethodKey(value) === "bank transfer";
 
 const getPrimaryRetailPayment = (payments) =>
   (Array.isArray(payments) ? payments : []).find((payment) => payment.paymentType === "full-payment") || null;
@@ -189,6 +196,66 @@ const ensureRetailPayPalPayment = async (order) => {
     paymentType: "full-payment",
     status: "unpaid",
   });
+};
+
+const ensureRetailBankTransferPayment = async (order) => {
+  const existingPayments = await listSupabasePaymentsByOrder(order.id);
+  const primaryPayment = getPrimaryRetailPayment(existingPayments);
+
+  if (primaryPayment?.id) {
+    const updatedPayment = await updateSupabasePayment(
+      primaryPayment.id,
+      {
+        paymentMethod: "Bank Transfer",
+        paymentProvider: "bank_transfer",
+        settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
+        status: ["payment_submitted", "paid"].includes(String(primaryPayment.status || "").trim().toLowerCase())
+          ? primaryPayment.status
+          : "pending",
+      },
+      {
+        createdBy: "system",
+      }
+    );
+    const updatedOrder = await updateSupabaseOrder(
+      order.id,
+      {
+        paymentMethod: "Bank Transfer",
+        paymentStatus: "pending",
+        orderStatus: "awaiting_payment",
+      },
+      {
+        createdBy: "system",
+      }
+    );
+    return {
+      payment: updatedPayment,
+      order: updatedOrder,
+    };
+  }
+
+  const paymentPayload = await createSupabasePaymentForOrder(order.id, {
+    paymentMethod: "Bank Transfer",
+    paymentProvider: "bank_transfer",
+    settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
+    paymentType: "full-payment",
+    status: "pending",
+  });
+  const updatedOrder = await updateSupabaseOrder(
+    order.id,
+    {
+      paymentMethod: "Bank Transfer",
+      paymentStatus: "pending",
+      orderStatus: "awaiting_payment",
+    },
+    {
+      createdBy: "system",
+    }
+  );
+  return {
+    payment: paymentPayload.payment,
+    order: updatedOrder,
+  };
 };
 
 const finalizePayPalPaymentSuccess = async ({ order, payment, paypalOrderId, paypalCaptureId, paidAt, source }) => {
@@ -1565,11 +1632,14 @@ const handleOrderCreate = async (request, response) => {
     const orderInput = body?.order && typeof body.order === "object" ? body.order : body;
     let order = await createSupabaseOrder(orderInput);
     let createdPayment = null;
+    const requestedPaymentMethod = String(orderInput?.paymentMethod || "").trim();
 
     const isWholesale = String(order?.purchaseMode || orderInput?.purchaseMode || "").toLowerCase() === "wholesale";
     if (!isWholesale && order?.id) {
       try {
-        const paymentPayload = await ensureRetailPayPalPayment(order);
+        const paymentPayload = isBankTransferMethod(requestedPaymentMethod)
+          ? await ensureRetailBankTransferPayment(order)
+          : await ensureRetailPayPalPayment(order);
         createdPayment = paymentPayload.payment || null;
         order = paymentPayload.order || order;
       } catch (paymentError) {
@@ -1617,6 +1687,97 @@ const handleOrderCreate = async (request, response) => {
     console.error("[orders] create failed:", error);
     sendJson(response, 400, {
       error: error?.message || "Unable to create order.",
+    });
+  }
+
+  return true;
+};
+
+const handleBankTransferProofUpload = async (request, response, orderId) => {
+  try {
+    const normalizedOrderId = String(orderId || "").trim();
+    if (!normalizedOrderId) {
+      throw new Error("Order id is required.");
+    }
+
+    const order = await getSupabaseOrderById(normalizedOrderId);
+    if (!order?.id) {
+      sendJson(response, 404, {
+        error: "Order not found.",
+      });
+      return true;
+    }
+
+    const formData = await readMultipartFormData(request);
+    const paymentId = String(formData.get("paymentId") || "").trim();
+    const transactionReference = String(formData.get("transactionReference") || "").trim();
+    const file = formData.get("file");
+
+    if (!paymentId) {
+      throw new Error("Payment id is required.");
+    }
+
+    const payment = await getSupabasePaymentById(paymentId);
+    if (!payment?.id || String(payment.orderId || "").trim() !== order.id) {
+      throw new Error("Payment record not found for this order.");
+    }
+
+    if (!isBankTransferMethod(payment.paymentMethod) && String(payment.paymentProvider || "").trim().toLowerCase() !== "bank_transfer") {
+      throw new Error("Payment proof can only be uploaded for bank transfer records.");
+    }
+
+    if (!(file instanceof File) || !file.size) {
+      if (!String(payment.paymentProofUrl || "").trim()) {
+        throw new Error("A payment proof image is required.");
+      }
+    }
+
+    const asset =
+      file instanceof File && file.size
+        ? await storeUploadedAsset(file, {
+            usageType: "payment_proof",
+            displayName: `${order.orderNumber || order.orderId || order.id} payment proof`,
+            altText: `${order.orderNumber || order.orderId || order.id} payment proof`,
+          })
+        : null;
+
+    const updatedPayment = await updateSupabasePayment(
+      payment.id,
+      {
+        paymentMethod: "Bank Transfer",
+        paymentProvider: "bank_transfer",
+        settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
+        transactionId: transactionReference,
+        paymentProofUrl: asset?.secureUrl || asset?.url || payment.paymentProofUrl || "",
+        status: "payment_submitted",
+      },
+      {
+        createdBy: "customer",
+      }
+    );
+
+    await createSupabaseOrderEvent(order.id, {
+      eventType: "payment_status_changed",
+      title: "Bank transfer proof submitted",
+      description: `Customer submitted bank transfer proof for ${order.orderNumber || order.orderId || order.id}.`,
+      createdBy: "customer",
+      metadata: {
+        paymentId: updatedPayment.id,
+        paymentMethod: "Bank Transfer",
+        transactionReference,
+        paymentProofUrl: updatedPayment.paymentProofUrl || asset?.secureUrl || asset?.url || payment.paymentProofUrl || "",
+      },
+    });
+
+    sendJson(response, 201, {
+      ok: true,
+      payment: updatedPayment,
+      asset,
+    });
+  } catch (error) {
+    console.error("[payments] bank transfer proof upload failed:", error);
+    sendJson(response, error?.status || 400, {
+      error: error?.message || "Unable to upload bank transfer proof.",
     });
   }
 
@@ -2947,6 +3108,14 @@ const handleAdminApi = async (request, response, requestUrl) => {
     if (request.method === "POST") {
       return handleOrderEventCreate(request, response, orderId);
     }
+  }
+
+  if (requestUrl.pathname.startsWith("/api/orders/") && requestUrl.pathname.endsWith("/bank-transfer-proof") && request.method === "POST") {
+    return handleBankTransferProofUpload(
+      request,
+      response,
+      parseNestedOrderIdFromPath(requestUrl.pathname, "/bank-transfer-proof")
+    );
   }
 
   if (requestUrl.pathname.startsWith("/api/orders/") && requestUrl.pathname.endsWith("/order-status") && request.method === "PATCH") {

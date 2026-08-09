@@ -81,10 +81,30 @@
       adminEmail: "",
       adminPassword: "",
       recoveryEmail: "",
-      paymentMethods: ["Credit Card", "PayPal", "Bank Transfer", "Wise"],
+      paymentMethods: ["PayPal", "Bank Transfer"],
       language: "English",
       themeColor: "#111827",
       systemConfig: "",
+      bankTransferSettings: {
+        providerName: "WorldFirst",
+        usd: {
+          bankName: "",
+          accountName: "",
+          accountNumber: "",
+          swiftCode: "",
+        },
+        eur: {
+          bankName: "",
+          iban: "",
+          accountName: "",
+        },
+        gbp: {
+          bankName: "",
+          accountName: "",
+          accountNumber: "",
+          sortCode: "",
+        },
+      },
     },
     homepage: {
       eyebrow: "PREMIUM WORKSPACE SOLUTIONS",
@@ -843,15 +863,34 @@
 
   const normalizeSettings = (value) => {
     const settings = asObject(value);
+    const bankTransferSettings = asObject(settings.bankTransferSettings);
+    const normalizeBankTransferCurrency = (currency, fields) => {
+      const source = asObject(currency);
+      return fields.reduce((accumulator, field) => {
+        accumulator[field] = String(source[field] || "");
+        return accumulator;
+      }, {});
+    };
 
     return {
       adminEmail: "",
       adminPassword: "",
       recoveryEmail: normalizeEmailContact(settings.recoveryEmail),
-      paymentMethods: asStringArray(settings.paymentMethods || ["Credit Card", "PayPal", "Bank Transfer", "Wise"]),
+      paymentMethods: asStringArray(settings.paymentMethods || ["PayPal", "Bank Transfer"]),
       language: String(settings.language || "English"),
       themeColor: String(settings.themeColor || "#111827"),
       systemConfig: String(settings.systemConfig || ""),
+      bankTransferSettings: {
+        providerName: String(bankTransferSettings.providerName || "WorldFirst"),
+        usd: normalizeBankTransferCurrency(bankTransferSettings.usd, [
+          "bankName",
+          "accountName",
+          "accountNumber",
+          "swiftCode",
+        ]),
+        eur: normalizeBankTransferCurrency(bankTransferSettings.eur, ["bankName", "iban", "accountName"]),
+        gbp: normalizeBankTransferCurrency(bankTransferSettings.gbp, ["bankName", "accountName", "accountNumber", "sortCode"]),
+      },
     };
   };
 
@@ -1812,6 +1851,7 @@
         language: nextSettings.language,
         themeColor: nextSettings.themeColor,
         systemConfig: nextSettings.systemConfig,
+        bankTransferSettings: nextSettings.bankTransferSettings,
       }),
     });
     const cms = normalizeCmsPayload(cmsPayload?.siteConfig || cmsPayload, state?.products || []);

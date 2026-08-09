@@ -2741,6 +2741,27 @@ h3 {
   margin: 2px 0 0;
 }
 
+.bank-transfer-box,
+.bank-transfer-proof-box {
+  display: grid;
+  gap: 14px;
+}
+
+.bank-transfer-proof-grid {
+  align-items: start;
+}
+
+.bank-transfer-proof-link {
+  margin: 0;
+  color: var(--color-text-soft);
+  font-size: 0.92rem;
+}
+
+.bank-transfer-proof-link a {
+  color: var(--color-blue);
+  font-weight: 700;
+}
+
 .checkout-quantity-note {
   margin: -6px 0 0;
   color: var(--color-text-soft);

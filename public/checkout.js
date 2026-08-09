@@ -12,6 +12,8 @@ const checkoutForm = document.querySelector("#checkout-form");
 const checkoutStatus = document.querySelector(".checkout-status");
 const checkoutActionButton = document.querySelector("#checkout-action-button");
 const checkoutNextStepNote = document.querySelector("#checkout-next-step-note");
+const checkoutPaymentMethods = document.querySelector("#checkout-payment-methods");
+const checkoutPaymentMethodGrid = document.querySelector("#checkout-payment-method-grid");
 const routes = window.ApexLinkRoutes || {
   products: "/products",
   payment: "/payment",
@@ -22,6 +24,9 @@ let currentPurchaseMode = "retail";
 let currentMinimumQuantity = 1;
 let quantityValidationTimer;
 let isSubmittingOrder = false;
+let currentCheckoutPaymentMethod = "PayPal";
+let currentSiteSettings = null;
+const RETAIL_CHECKOUT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer"];
 
 const setCheckoutActionState = (label = "", disabled = false) => {
   if (checkoutActionButton) {
@@ -39,6 +44,31 @@ const escapeHtml = (value) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+const normalizePaymentMethodName = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+
+const getConfiguredCheckoutPaymentMethods = () => {
+  if (!Array.isArray(currentSiteSettings?.paymentMethods)) {
+    return RETAIL_CHECKOUT_SUPPORTED_METHODS.slice();
+  }
+
+  const seen = new Set();
+  return currentSiteSettings.paymentMethods
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const normalized = normalizePaymentMethodName(item);
+      if (!normalized || seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    });
+};
 
 const requestJson = async (url, options = {}) => {
   const response = await fetch(url, {
@@ -242,6 +272,55 @@ const getCheckoutViewModel = (product, mode, quantity = 1) => {
 const getPaymentUrl = (productId, mode) =>
   `${routes.payment || "/payment"}?id=${encodeURIComponent(productId)}&mode=${encodeURIComponent(mode)}`;
 
+const getRetailCheckoutPaymentMethods = () =>
+  getConfiguredCheckoutPaymentMethods().filter((method) =>
+    RETAIL_CHECKOUT_SUPPORTED_METHODS.some(
+      (supportedMethod) => normalizePaymentMethodName(supportedMethod) === normalizePaymentMethodName(method)
+    )
+  );
+
+const renderCheckoutPaymentMethods = () => {
+  if (!checkoutPaymentMethods || !checkoutPaymentMethodGrid) {
+    return;
+  }
+
+  if (currentPurchaseMode !== "retail") {
+    checkoutPaymentMethods.hidden = true;
+    checkoutPaymentMethodGrid.innerHTML = "";
+    return;
+  }
+
+  const availableMethods = getRetailCheckoutPaymentMethods();
+  currentCheckoutPaymentMethod = availableMethods.includes(currentCheckoutPaymentMethod)
+    ? currentCheckoutPaymentMethod
+    : availableMethods[0] || "";
+
+  checkoutPaymentMethods.hidden = false;
+  checkoutPaymentMethodGrid.innerHTML = availableMethods.length
+    ? availableMethods
+    .map(
+      (method, index) => `
+        <label class="payment-method-card">
+          <input
+            type="radio"
+            name="checkoutPaymentMethod"
+            value="${escapeHtml(method)}"
+            ${currentCheckoutPaymentMethod ? (currentCheckoutPaymentMethod === method ? "checked" : "") : index === 0 ? "checked" : ""}
+          >
+          <span class="payment-method-indicator" aria-hidden="true"></span>
+          <span class="payment-method-label">${escapeHtml(method)}</span>
+        </label>
+      `
+    )
+    .join("")
+    : `<div class="checkout-note-box"><strong>No payment methods enabled</strong><p>Please contact our team before placing a retail order.</p></div>`;
+};
+
+const getSelectedCheckoutPaymentMethod = () => {
+  const selected = checkoutForm?.querySelector('input[name="checkoutPaymentMethod"]:checked');
+  return String(selected?.value || currentCheckoutPaymentMethod || "").trim();
+};
+
 const renderProductSummary = (product) => {
   if (!productRoot || !product) {
     return;
@@ -293,9 +372,31 @@ const renderTotals = () => {
 
 const syncCheckoutModeUi = () => {
   if (currentPurchaseMode === "retail") {
-    setCheckoutActionState(isSubmittingOrder ? "Preparing PayPal..." : "Pay with PayPal", isSubmittingOrder);
+    const availableMethods = getRetailCheckoutPaymentMethods();
+    currentCheckoutPaymentMethod = getSelectedCheckoutPaymentMethod();
+    if (!availableMethods.length) {
+      setCheckoutActionState("No Payment Methods Available", true);
+      if (checkoutNextStepNote) {
+        checkoutNextStepNote.textContent =
+          "No retail payment methods are currently enabled. Please contact our team for manual assistance.";
+      }
+      return;
+    }
+    const isBankTransfer = currentCheckoutPaymentMethod === "Bank Transfer";
+    setCheckoutActionState(
+      isSubmittingOrder
+        ? isBankTransfer
+          ? "Creating Bank Transfer..."
+          : "Preparing PayPal..."
+        : isBankTransfer
+          ? "Continue to Bank Transfer"
+          : "Pay with PayPal",
+      isSubmittingOrder
+    );
     if (checkoutNextStepNote) {
-      checkoutNextStepNote.textContent = "Your retail order will be created first, then you will be redirected to PayPal Checkout.";
+      checkoutNextStepNote.textContent = isBankTransfer
+        ? "Your order will be created first, then you will be redirected to the payment page with WorldFirst bank transfer instructions."
+        : "Your retail order will be created first, then you will be redirected to PayPal Checkout.";
     }
     return;
   }
@@ -359,6 +460,11 @@ const setupCheckoutForm = () => {
     renderTotals();
   });
 
+  checkoutPaymentMethodGrid?.addEventListener("change", () => {
+    currentCheckoutPaymentMethod = getSelectedCheckoutPaymentMethod();
+    syncCheckoutModeUi();
+  });
+
   checkoutForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
 
@@ -377,19 +483,40 @@ const setupCheckoutForm = () => {
       return;
     }
 
+    if (currentPurchaseMode === "retail" && !getRetailCheckoutPaymentMethods().length) {
+      if (checkoutStatus) {
+        checkoutStatus.textContent = "No retail payment methods are currently enabled.";
+      }
+      return;
+    }
+
+    currentCheckoutPaymentMethod = getSelectedCheckoutPaymentMethod();
     const originalButtonLabel =
-      currentPurchaseMode === "retail" ? "Pay with PayPal" : "Continue to Payment";
+      currentPurchaseMode === "retail"
+        ? currentCheckoutPaymentMethod === "Bank Transfer"
+          ? "Continue to Bank Transfer"
+          : "Pay with PayPal"
+        : "Continue to Payment";
     let createdOrderId = "";
 
     try {
       isSubmittingOrder = true;
       setCheckoutActionState(
-        currentPurchaseMode === "retail" ? "Preparing PayPal..." : "Creating order...",
+        currentPurchaseMode === "retail"
+          ? currentCheckoutPaymentMethod === "Bank Transfer"
+            ? "Creating Bank Transfer..."
+            : "Preparing PayPal..."
+          : "Creating order...",
         true
       );
-      if (checkoutStatus) {
-        checkoutStatus.textContent =
-          currentPurchaseMode === "retail" ? "Creating order and preparing PayPal..." : "Creating order...";
+    if (checkoutStatus) {
+      checkoutStatus.textContent = currentPurchaseMode === "retail"
+        ? !getRetailCheckoutPaymentMethods().length
+          ? "No retail payment methods are currently available."
+          : currentCheckoutPaymentMethod === "Bank Transfer"
+            ? "Creating order and preparing bank transfer details..."
+            : "Creating order and preparing PayPal..."
+        : "Creating order...";
       }
 
       const quantity = enforceMinimumQuantity(true);
@@ -412,6 +539,7 @@ const setupCheckoutForm = () => {
             productId: currentProduct.id,
             quantity: String(quantity),
             message: String(formData.get("notes") || "").trim(),
+            paymentMethod: currentPurchaseMode === "retail" ? currentCheckoutPaymentMethod : "",
           },
         }),
       });
@@ -422,7 +550,7 @@ const setupCheckoutForm = () => {
         throw new Error("Order was not created.");
       }
 
-      if (currentPurchaseMode === "retail") {
+      if (currentPurchaseMode === "retail" && currentCheckoutPaymentMethod !== "Bank Transfer") {
         const paypalPayload = await requestJson("/api/paypal/create-order", {
           method: "POST",
           body: JSON.stringify({
@@ -443,7 +571,10 @@ const setupCheckoutForm = () => {
       }
 
       if (checkoutStatus) {
-        checkoutStatus.textContent = "Redirecting to payment...";
+        checkoutStatus.textContent =
+          currentPurchaseMode === "retail" && currentCheckoutPaymentMethod === "Bank Transfer"
+            ? "Redirecting to bank transfer instructions..."
+            : "Redirecting to payment...";
       }
 
       window.location.href = `${routes.payment || "/payment"}?orderId=${encodeURIComponent(createdOrderId)}`;
@@ -469,7 +600,8 @@ const initCheckoutPage = async () => {
 
   await store.ready;
   await store.trackVisit();
-  const website = await store.getWebsiteSettings();
+  const [website, settings] = await Promise.all([store.getWebsiteSettings(), store.getSettings()]);
+  currentSiteSettings = settings;
 
   const params = new URLSearchParams(window.location.search);
   const id = params.get("id");
@@ -495,6 +627,7 @@ const initCheckoutPage = async () => {
   currentMinimumQuantity = currentPurchaseMode === "wholesale"
     ? Math.max(1, Number(currentProduct.b2b?.wholesaleMoq || 1))
     : 1;
+  currentCheckoutPaymentMethod = getRetailCheckoutPaymentMethods()[0] || "";
 
   if (quantityInput) {
     quantityInput.min = String(currentMinimumQuantity);
@@ -509,6 +642,7 @@ const initCheckoutPage = async () => {
   }
 
   renderTotals();
+  renderCheckoutPaymentMethods();
   syncCheckoutModeUi();
 };
 
