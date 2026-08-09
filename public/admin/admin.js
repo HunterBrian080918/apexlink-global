@@ -4934,11 +4934,9 @@ const updateAdminSelectedConversationHeader = () => {
 
   const summaryNode = headerRoot.querySelector(".admin-chat-header-summary");
   if (summaryNode) {
-    const liveState = getAdminSupportLiveLabel(adminSupportRuntime.liveState);
     summaryNode.innerHTML = `
       ${selected.country ? `<span class="admin-chat-header-country">${escapeHtml(selected.country)}</span>` : ""}
       <span>${escapeHtml(getAdminConversationContextLabel(selected))}</span>
-      <span id="admin-support-live-status" data-state="${escapeHtml(adminSupportRuntime.liveState)}">${escapeHtml(liveState)}</span>
     `;
   }
 
@@ -4951,6 +4949,20 @@ const updateAdminSelectedConversationHeader = () => {
   const titleNode = headerRoot.querySelector(".admin-chat-header-title");
   if (titleNode) {
     titleNode.textContent = selected.customerName || "Website Visitor";
+  }
+
+  const avatarNode = headerRoot.querySelector(".admin-chat-header-avatar");
+  if (avatarNode) {
+    avatarNode.textContent = String(selected.customerName || selected.email || "C")
+      .trim()
+      .slice(0, 1)
+      .toUpperCase();
+  }
+
+  const statusBadge = headerRoot.querySelector(".admin-chat-header-status");
+  if (statusBadge) {
+    statusBadge.textContent = formatStatusLabel(selected.status || "open");
+    statusBadge.className = `admin-pill admin-chat-header-status ${getStatusClass(selected.status || "open")}`;
   }
 
   const statusSelect = headerRoot.querySelector("#thread-status-select");
@@ -5031,6 +5043,7 @@ const createCustomerPanelMarkup = (selected, customerOrders = []) => {
 
   const totalSpend = getSupportCustomerSpend(customerOrders);
   const recentOrders = customerOrders.slice(0, 3);
+  const linkedOrder = customerOrders[0]?.orderNumber || customerOrders[0]?.orderId || customerOrders[0]?.id || selected.relatedOrderNumber || "None";
 
   return `
     <aside class="admin-panel admin-customer-panel">
@@ -5065,11 +5078,20 @@ const createCustomerPanelMarkup = (selected, customerOrders = []) => {
         </section>
 
         <section class="admin-customer-crm-section">
+          <div class="admin-section-head">
+            <h4>Customer Info</h4>
+          </div>
           <div class="admin-customer-crm-row"><span>Name</span><strong>${escapeHtml(selected.customerName || "Not set")}</strong></div>
           <div class="admin-customer-crm-row"><span>Email</span><strong class="admin-break-anywhere">${escapeHtml(selected.email || "Not set")}</strong></div>
           <div class="admin-customer-crm-row"><span>Country</span><strong>${escapeHtml(selected.country || "Not set")}</strong></div>
           <div class="admin-customer-crm-row"><span>Company</span><strong>${escapeHtml(selected.company || "Not set")}</strong></div>
           <div class="admin-customer-crm-row"><span>Phone</span><strong>${escapeHtml(selected.customerPhone || selected.phone || "Not set")}</strong></div>
+        </section>
+
+        <section class="admin-customer-crm-section">
+          <div class="admin-section-head">
+            <h4>Conversation Info</h4>
+          </div>
           <div class="admin-customer-crm-row">
             <span>Customer Status</span>
             <select class="admin-compact-select" id="customer-profile-status">${CUSTOMER_STATUSES.map(
@@ -5082,6 +5104,13 @@ const createCustomerPanelMarkup = (selected, customerOrders = []) => {
           <div class="admin-customer-crm-row"><span>Last Activity</span><strong>${escapeHtml(
             formatDate(selected.lastMessageAt || selected.updatedAt)
           )}</strong></div>
+          <div class="admin-customer-crm-row"><span>Conversation Status</span><strong>${escapeHtml(
+            formatStatusLabel(selected.status || "open")
+          )}</strong></div>
+          <div class="admin-customer-crm-row"><span>Conversation Type</span><strong>${escapeHtml(
+            formatStatusLabel(selected.customerType || selected.conversationType || "retail")
+          )}</strong></div>
+          <div class="admin-customer-crm-row"><span>Linked Order</span><strong>${escapeHtml(linkedOrder)}</strong></div>
           <div class="admin-customer-crm-row"><span>Tags</span><div class="admin-tag-list">${
             Array.isArray(selected.tags) && selected.tags.length
               ? selected.tags.map((tag) => `<span class="admin-tag-chip">${escapeHtml(tag)}</span>`).join("")
@@ -5145,7 +5174,7 @@ const renderCustomersSectionView = (options = {}) => {
     : "chat";
   const showThreadList = !compactSupportViewport || activeMobileView === "list";
   const showChatPanel = !compactSupportViewport || activeMobileView === "chat";
-  const showCrmPanel = !compactSupportViewport || activeMobileView === "chat";
+  const showCrmPanel = !compactSupportViewport;
   const headerSummary = getSupportConversationHeaderSummary(selected, customerOrders);
 
   adminSupportRuntime.selected = selected;
@@ -5158,7 +5187,7 @@ const renderCustomersSectionView = (options = {}) => {
           <div class="admin-thread-panel-head">
             <div class="admin-panel-header admin-panel-header-compact admin-thread-panel-header">
               <div>
-                <h3>Customer List</h3>
+                <h3>Customer Support</h3>
                 <p class="admin-thread-count">${formatNumber(conversations.length)} active conversation${
                   conversations.length === 1 ? "" : "s"
                 }</p>
@@ -5217,26 +5246,36 @@ const renderCustomersSectionView = (options = {}) => {
                         ? '<button class="admin-secondary-button admin-support-back" type="button" id="support-mobile-back">Back to list</button>'
                         : ""
                     }
-                    <div class="admin-chat-header-main">
-                      <div class="admin-chat-header-topline">
-                        <h3 class="admin-chat-header-title">${escapeHtml(selected.customerName || "Website Visitor")}</h3>
-                        <span class="admin-pill ${getStatusClass(selected.status || "open")}">${escapeHtml(
-                          formatStatusLabel(selected.status || "open")
-                        )}</span>
-                      </div>
-                      <p class="admin-chat-header-email">${escapeHtml(selected.email || "No email")}</p>
-                      <div class="admin-chat-header-summary">
-                        ${selected.country ? `<span class="admin-chat-header-country">${escapeHtml(selected.country)}</span>` : ""}
-                        <span>${escapeHtml(getAdminConversationContextLabel(selected))}</span>
-                        <span id="admin-support-live-status" data-state="${escapeHtml(adminSupportRuntime.liveState)}">${escapeHtml(
-                          liveLabel
-                        )}</span>
+                    <div class="admin-chat-header-main admin-chat-header-profile">
+                      <span class="admin-chat-header-avatar" aria-hidden="true">${escapeHtml(
+                        String(selected.customerName || selected.email || "C")
+                          .trim()
+                          .slice(0, 1)
+                          .toUpperCase()
+                      )}</span>
+                      <div class="admin-chat-header-copy">
+                        <div class="admin-chat-header-topline">
+                          <h3 class="admin-chat-header-title">${escapeHtml(selected.customerName || "Website Visitor")}</h3>
+                          <span class="admin-pill admin-chat-header-status ${getStatusClass(selected.status || "open")}">${escapeHtml(
+                            formatStatusLabel(selected.status || "open")
+                          )}</span>
+                        </div>
+                        <p class="admin-chat-header-email">${escapeHtml(selected.email || "No email")}</p>
+                        <div class="admin-chat-header-summary">
+                          ${selected.country ? `<span class="admin-chat-header-country">${escapeHtml(selected.country)}</span>` : ""}
+                          <span>${escapeHtml(getAdminConversationContextLabel(selected))}</span>
+                        </div>
                       </div>
                     </div>
-                    <div class="admin-chat-header-order">
-                      <span>${escapeHtml(headerSummary.orderNumber)}</span>
-                      <strong>${escapeHtml(headerSummary.orderStatus)}</strong>
-                      <small>${escapeHtml(headerSummary.orderAmount)}</small>
+                    <div class="admin-chat-header-meta">
+                      <div class="admin-chat-header-brief">
+                        <span>${escapeHtml(headerSummary.orderNumber)}</span>
+                        <strong>${escapeHtml(headerSummary.orderStatus)}</strong>
+                        <small>${escapeHtml(headerSummary.orderAmount)}</small>
+                      </div>
+                      <span id="admin-support-live-status" class="admin-chat-live-chip" data-state="${escapeHtml(
+                        adminSupportRuntime.liveState
+                      )}">${escapeHtml(liveLabel)}</span>
                     </div>
                     <div class="admin-chat-header-actions">
                       <label>

@@ -3597,3 +3597,531 @@ textarea {
     max-width: 100%;
   }
 }
+
+/* Support UI V3 rebuild */
+.admin-support-shell {
+  --support-header-offset: 164px;
+  height: calc(100vh - var(--support-header-offset));
+  min-height: 620px;
+}
+
+.admin-support-shell .admin-chat-layout.admin-support-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(650px, 1fr) 300px;
+  gap: 18px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.admin-support-shell .admin-thread-panel,
+.admin-support-shell .admin-chat-panel,
+.admin-support-shell .admin-customer-panel,
+.admin-support-shell .admin-support-crm-wrap {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.admin-support-shell .admin-thread-panel,
+.admin-support-shell .admin-chat-panel,
+.admin-support-shell .admin-customer-panel {
+  display: grid;
+  overflow: hidden;
+  padding: 16px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(16, 24, 40, 0.06);
+}
+
+.admin-support-shell .admin-thread-panel {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 14px;
+}
+
+.admin-support-shell .admin-thread-panel-head {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-support-shell .admin-thread-panel-header h3,
+.admin-support-shell .admin-customer-crm-section h4,
+.admin-support-shell .admin-chat-header-title,
+.admin-support-shell .admin-thread-topline strong {
+  overflow: visible;
+  line-height: 1.25;
+}
+
+.admin-support-shell .admin-thread-count {
+  margin: 2px 0 0;
+  color: var(--text-faint);
+  font-size: 0.83rem;
+}
+
+.admin-support-shell .admin-thread-toolbar {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-support-shell .admin-thread-filter-row-v2 {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.admin-support-shell .admin-thread-filter {
+  min-width: 124px;
+}
+
+.admin-support-shell .admin-thread-list {
+  display: grid;
+  gap: 10px;
+  min-height: 0;
+  padding: 2px 0 0;
+  overflow-y: auto;
+}
+
+.admin-support-shell .admin-thread-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+  box-shadow: none;
+  transform: none;
+}
+
+.admin-support-shell .admin-thread-row:hover,
+.admin-support-shell .admin-thread-row.is-active {
+  transform: none;
+}
+
+.admin-support-shell .admin-thread-row:hover {
+  background: #f4f7fb;
+  border-color: #d7dfef;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+}
+
+.admin-support-shell .admin-thread-row.is-active {
+  background: rgba(29, 78, 216, 0.06);
+  border-color: rgba(29, 78, 216, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(29, 78, 216, 0.08);
+}
+
+.admin-support-shell .admin-thread-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(29, 78, 216, 0.08);
+}
+
+.admin-support-shell .admin-thread-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-support-shell .admin-thread-topline,
+.admin-support-shell .admin-thread-bottomline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.admin-support-shell .admin-thread-topline strong {
+  min-width: 0;
+  font-size: 0.95rem;
+}
+
+.admin-support-shell .admin-thread-topline small,
+.admin-support-shell .admin-thread-email {
+  color: var(--text-faint);
+  font-size: 0.75rem;
+}
+
+.admin-support-shell .admin-thread-preview {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.admin-support-shell .admin-thread-bottomline .admin-pill {
+  font-size: 0.72rem;
+}
+
+.admin-support-shell .admin-unread-badge {
+  padding: 4px 8px;
+  font-size: 0.7rem;
+}
+
+.admin-support-shell .admin-chat-panel {
+  grid-template-rows: 80px minmax(0, 1fr) auto;
+  gap: 0;
+}
+
+.admin-support-shell .admin-chat-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  min-height: 80px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.admin-support-shell .admin-chat-header-profile {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-support-shell .admin-chat-header-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: rgba(29, 78, 216, 0.08);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.admin-support-shell .admin-chat-header-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-support-shell .admin-chat-header-topline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.admin-support-shell .admin-chat-header-title {
+  min-width: 0;
+  font-size: 1.08rem;
+}
+
+.admin-support-shell .admin-chat-header-email,
+.admin-support-shell .admin-chat-header-summary {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.admin-support-shell .admin-chat-header-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-support-shell .admin-chat-live-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.admin-support-shell .admin-chat-header-meta {
+  display: grid;
+  gap: 6px;
+  min-width: 130px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.admin-support-shell .admin-chat-header-brief {
+  display: grid;
+  gap: 2px;
+}
+
+.admin-support-shell .admin-chat-header-brief span,
+.admin-support-shell .admin-chat-header-brief small {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+}
+
+.admin-support-shell .admin-chat-header-brief strong {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.admin-support-shell .admin-chat-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.admin-support-shell .admin-chat-header-actions label {
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.admin-support-shell .admin-chat-history {
+  min-height: 0;
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fafc;
+  overflow-y: auto;
+}
+
+.admin-support-shell .admin-chat-message {
+  margin-top: 14px;
+}
+
+.admin-support-shell .admin-chat-message.is-admin + .admin-chat-message.is-admin,
+.admin-support-shell .admin-chat-message.is-customer + .admin-chat-message.is-customer,
+.admin-support-shell .admin-chat-message.is-system + .admin-chat-message.is-system {
+  margin-top: 8px;
+}
+
+.admin-support-shell .admin-chat-bubble {
+  max-width: min(68%, 520px);
+  padding: 12px 14px;
+  border-radius: 12px;
+  line-height: 1.55;
+}
+
+.admin-support-shell .admin-chat-meta {
+  margin-top: 4px;
+  line-height: 1.3;
+}
+
+.admin-support-shell .admin-chat-footer {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.admin-support-shell .admin-chat-composer {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-support-shell .admin-chat-composer textarea {
+  min-height: 56px;
+  max-height: 120px;
+  padding: 14px 16px;
+  line-height: 1.55;
+  resize: none;
+}
+
+.admin-support-shell .admin-chat-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-support-shell .admin-chat-attach,
+.admin-support-shell .admin-quick-replies-drawer summary,
+.admin-support-shell .admin-chat-composer .admin-primary-button {
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.admin-support-shell .admin-chat-attach {
+  padding: 10px 12px;
+}
+
+.admin-support-shell .admin-quick-replies-drawer {
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.admin-support-shell .admin-quick-replies-drawer summary {
+  padding: 10px 12px;
+}
+
+.admin-support-shell .admin-quick-replies {
+  gap: 8px;
+}
+
+.admin-support-shell .admin-customer-panel {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.admin-support-shell .admin-customer-crm-card {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.admin-support-shell .admin-customer-crm-hero {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.admin-support-shell .admin-customer-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+}
+
+.admin-support-shell .admin-customer-profile-copy h3 {
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.admin-support-shell .admin-customer-profile-copy p {
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.admin-support-shell .admin-customer-profile-badges {
+  gap: 6px;
+}
+
+.admin-support-shell .admin-customer-crm-section {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.admin-support-shell .admin-customer-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-support-shell .admin-customer-stat-card {
+  padding: 12px;
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid var(--line);
+}
+
+.admin-support-shell .admin-customer-crm-row {
+  display: grid;
+  gap: 4px;
+}
+
+.admin-support-shell .admin-customer-crm-row span {
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.admin-support-shell .admin-customer-crm-row strong,
+.admin-support-shell .admin-customer-crm-row select,
+.admin-support-shell .admin-linked-record-main strong,
+.admin-support-shell .admin-linked-record-main p,
+.admin-support-shell .admin-linked-record-side span,
+.admin-support-shell .admin-linked-record-side small {
+  line-height: 1.4;
+  overflow: visible;
+}
+
+.admin-support-shell .admin-support-order-list {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-support-shell .admin-support-order-list .admin-linked-record-row {
+  padding: 12px;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.admin-support-shell .admin-support-order-list .admin-linked-record-side {
+  min-width: 92px;
+}
+
+@media (max-width: 1200px) {
+  .admin-support-shell .admin-chat-layout.admin-support-layout {
+    grid-template-columns: 280px minmax(520px, 1fr) 280px;
+  }
+}
+
+@media (max-width: 999px) {
+  .admin-support-shell {
+    height: auto;
+    min-height: 0;
+  }
+
+  .admin-support-shell .admin-chat-layout.admin-support-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .admin-support-shell .admin-thread-panel,
+  .admin-support-shell .admin-chat-panel,
+  .admin-support-shell .admin-customer-panel {
+    height: auto;
+    min-height: 0;
+  }
+
+  .admin-support-shell .admin-chat-panel {
+    grid-template-rows: auto minmax(320px, 1fr) auto;
+  }
+
+  .admin-support-shell .admin-chat-header {
+    grid-template-columns: 1fr;
+    align-items: start;
+    min-height: 0;
+  }
+
+  .admin-support-shell .admin-chat-header-actions {
+    justify-content: start;
+  }
+}
+
+@media (max-width: 720px) {
+  .admin-support-shell .admin-chat-header-profile {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .admin-support-shell .admin-chat-header-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+  }
+
+  .admin-support-shell .admin-thread-filter-row-v2,
+  .admin-support-shell .admin-thread-topline,
+  .admin-support-shell .admin-thread-bottomline,
+  .admin-support-shell .admin-chat-composer-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-support-shell .admin-chat-bubble {
+    max-width: 100%;
+  }
+}
