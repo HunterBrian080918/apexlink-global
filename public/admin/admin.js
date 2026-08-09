@@ -3,63 +3,58 @@ const STORAGE_KEY = "northstar-platform-store-v1";
 const NAV_GROUP_STORAGE_KEY = "avelix-admin-nav-groups-v1";
 const navStructure = {
   standalone: [
-    { id: "dashboard", label: "Dashboard", title: "Data Overview", icon: "D" },
+    { id: "dashboard", label: "Dashboard", title: "Data Overview", icon: "dashboard" },
   ],
   groups: [
     {
       id: "commerce",
       label: "Commerce",
-      icon: "C",
+      icon: "commerce",
       items: [
-        { id: "orders", label: "Orders", title: "Order Management", icon: "O" },
-        { id: "payments", label: "Payments", title: "Payment Records", icon: "P" },
-        { id: "products", label: "Products", title: "Product Catalog", icon: "G" },
-        { id: "inventory", label: "Inventory", title: "Inventory", icon: "I", future: true },
+        { id: "orders", label: "Orders", title: "Order Management", icon: "orders" },
+        { id: "payments", label: "Payments", title: "Payment Records", icon: "payments" },
+        { id: "products", label: "Products", title: "Product Catalog", icon: "products" },
       ],
     },
     {
       id: "customers-group",
       label: "Customers",
-      icon: "U",
+      icon: "customers",
       items: [
-        { id: "customers", label: "Customers", title: "Customer Records", icon: "C" },
-        { id: "support", label: "Support", title: "Customer Support", icon: "S" },
+        { id: "customers", label: "Customer List", title: "Customer Records", icon: "customer-list" },
+        { id: "support", label: "Support", title: "Customer Support", icon: "support" },
       ],
     },
     {
       id: "content",
       label: "Content",
-      icon: "T",
+      icon: "content",
       items: [
-        { id: "media", label: "Media", title: "Media Library", icon: "M" },
-        { id: "website-pages", label: "Website Pages", title: "Website Pages", icon: "W" },
-        { id: "seo", label: "SEO", title: "SEO Settings", icon: "E" },
+        { id: "media", label: "Media", title: "Media Library", icon: "media" },
+        { id: "website-pages", label: "Website", title: "Website Pages", icon: "website" },
+        { id: "seo", label: "SEO", title: "SEO Settings", icon: "seo" },
       ],
     },
     {
       id: "settings-group",
       label: "Settings",
-      icon: "S",
+      icon: "settings",
       items: [
-        { id: "general-settings", label: "General Settings", title: "General Settings", icon: "G" },
-        { id: "payment-settings", label: "Payment Settings", title: "Payment Settings", icon: "$" },
-        { id: "shipping-settings", label: "Shipping Settings", title: "Shipping Settings", icon: "H" },
-        { id: "account-settings", label: "Account Settings", title: "Account Settings", icon: "A" },
+        { id: "general-settings", label: "General", title: "General Settings", icon: "general" },
+        { id: "payment-settings", label: "Payments", title: "Payment Settings", icon: "payment-settings" },
+        { id: "shipping-settings", label: "Shipping", title: "Shipping Settings", icon: "shipping" },
+        { id: "account-settings", label: "Account", title: "Account Settings", icon: "account" },
       ],
     },
-    {
-      id: "storefront-group",
-      label: "Storefront",
-      icon: "L",
-      items: [
-        { id: "storefront", label: "Open Storefront", title: "Open Storefront", icon: "L", href: "/", external: true },
-      ],
-    },
+  ],
+  utility: [
+    { id: "storefront", label: "View Store", title: "View Store", icon: "storefront", href: "/", external: true },
   ],
 };
 const navItems = [
   ...navStructure.standalone,
   ...navStructure.groups.flatMap((group) => group.items),
+  ...(navStructure.utility || []),
 ];
 const navItemRegistry = navItems.reduce((accumulator, item) => {
   accumulator[item.id] = item;
@@ -93,6 +88,10 @@ const adminState = {
   theme: localStorage.getItem("northstar-admin-theme") || "light",
   nav: {
     expandedGroups: loadNavGroupState(),
+    drawerOpen: false,
+  },
+  settings: {
+    bankTransferCurrency: "usd",
   },
   dashboard: {
     revenueRange: 7,
@@ -175,6 +174,8 @@ const shell = document.querySelector("#admin-shell");
 const loginShell = document.querySelector("#admin-login-shell");
 const loginForm = document.querySelector("#admin-login-form");
 const loginError = document.querySelector("#admin-login-error");
+const shellToggle = document.querySelector("#admin-shell-toggle");
+const sidebarBackdrop = document.querySelector("#admin-sidebar-backdrop");
 const navRoot = document.querySelector("#admin-nav");
 const contentRoot = document.querySelector("#admin-content");
 const sectionLabel = document.querySelector("#admin-section-label");
@@ -239,6 +240,44 @@ const requestJson = async (url, options = {}) => {
 };
 
 const notificationRuntime = { items: [], timer: null };
+const NAV_ICONS = {
+  dashboard:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"></rect><rect x="13.5" y="3.5" width="7" height="11" rx="2"></rect><rect x="3.5" y="13.5" width="7" height="7" rx="2"></rect><rect x="13.5" y="17.5" width="7" height="3" rx="1.5"></rect></svg>',
+  commerce:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h16"></path><path d="M6 7.5l1.2 10.1a2 2 0 0 0 2 1.7h5.6a2 2 0 0 0 2-1.7L18 7.5"></path><path d="M9 11.5v4"></path><path d="M15 11.5v4"></path><path d="M8 7.5V6a4 4 0 0 1 8 0v1.5"></path></svg>',
+  orders:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 9h8"></path><path d="M8 13h8"></path><path d="M8 17h5"></path></svg>',
+  payments:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6" width="17" height="12" rx="2.5"></rect><path d="M3.5 10.5h17"></path><path d="M8 15h2"></path></svg>',
+  products:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.8 5 7.6v8.8l7 3.8 7-3.8V7.6l-7-3.8Z"></path><path d="M5.5 8 12 11.5 18.5 8"></path><path d="M12 11.5v8"></path></svg>',
+  customers:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 19a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4"></path><circle cx="9.5" cy="8" r="3"></circle><path d="M17 11a3 3 0 1 0 0-6"></path><path d="M21 19a4 4 0 0 0-3-3.9"></path></svg>',
+  "customer-list":
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="3"></circle><path d="M3.5 19a4.5 4.5 0 0 1 9 0"></path><path d="M15 8h5"></path><path d="M15 12h5"></path><path d="M15 16h5"></path></svg>',
+  support:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 17.5h-.5A2.5 2.5 0 0 1 3 15V7.5A2.5 2.5 0 0 1 5.5 5h13A2.5 2.5 0 0 1 21 7.5V15a2.5 2.5 0 0 1-2.5 2.5H12l-4 3v-3Z"></path></svg>',
+  content:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"></rect><path d="M8 9h8"></path><path d="M8 13h8"></path><path d="M8 17h4"></path></svg>',
+  media:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="14" rx="2.5"></rect><circle cx="9" cy="10" r="1.5"></circle><path d="m20.5 16-4.7-4.7a1.5 1.5 0 0 0-2.1 0L8 17"></path></svg>',
+  website:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"></rect><path d="M3.5 8.5h17"></path><path d="M8 4.5v15"></path></svg>',
+  seo:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="5.5"></circle><path d="m15 15 5 5"></path><path d="M8.5 10.5h4"></path></svg>',
+  settings:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"></circle><path d="M19.2 15a1 1 0 0 0 .2 1.1l.1.1a1.8 1.8 0 1 1-2.5 2.5l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a1.8 1.8 0 1 1-3.6 0v-.1a1 1 0 0 0-.7-.9 1 1 0 0 0-1 .2l-.1.1a1.8 1.8 0 1 1-2.6-2.5l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a1.8 1.8 0 1 1 0-3.6h.1a1 1 0 0 0 .9-.7 1 1 0 0 0-.2-1l-.1-.1a1.8 1.8 0 1 1 2.5-2.6l.1.1a1 1 0 0 0 1.1.2h.1a1 1 0 0 0 .6-.9V4a1.8 1.8 0 1 1 3.6 0v.1a1 1 0 0 0 .7.9 1 1 0 0 0 1-.2l.1-.1a1.8 1.8 0 1 1 2.6 2.5l-.1.1a1 1 0 0 0-.2 1.1v.1a1 1 0 0 0 .9.6h.1a1.8 1.8 0 1 1 0 3.6h-.1a1 1 0 0 0-.9.7Z"></path></svg>',
+  general:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h16"></path><path d="M4 12h16"></path><path d="M4 17.5h10"></path></svg>',
+  "payment-settings":
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"></path><path d="M16 7.5c0-1.7-1.8-3-4-3s-4 1.3-4 3 1.8 3 4 3 4 1.3 4 3-1.8 3-4 3-4-1.3-4-3"></path></svg>',
+  shipping:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7h11v8h-11Z"></path><path d="M14.5 10h3.5l2.5 2.8v2.2h-6"></path><circle cx="7.5" cy="17.5" r="1.8"></circle><circle cx="17.5" cy="17.5" r="1.8"></circle></svg>',
+  account:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.2"></circle><path d="M5 19a7 7 0 0 1 14 0"></path></svg>',
+  storefront:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5h5v5"></path><path d="M10 14 19 5"></path><path d="M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"></path></svg>',
+};
 
 const renderNotificationCenter = () => {
   const unread = notificationRuntime.items.filter((item) => !item.isRead).length;
@@ -946,6 +985,7 @@ const PAYMENT_FILTER_OPTIONS = [
 const PAYMENT_REVIEW_STATUSES = ["pending", "paid", "failed", "refunded", "cancelled"];
 const isCompactAdminViewport = () => window.matchMedia("(max-width: 1200px)").matches;
 const isAdminSupportCompactViewport = () => window.matchMedia("(max-width: 999px)").matches;
+const isAdminSidebarDrawerViewport = () => window.matchMedia("(max-width: 959px)").matches;
 const normalizeStatusValue = (value) =>
   String(value || "")
     .trim()
@@ -972,6 +1012,120 @@ const getEnabledPaymentMethods = (methods) => {
       seen.add(normalized);
       return true;
     });
+};
+
+const renderNavIcon = (icon) => NAV_ICONS[icon] || NAV_ICONS.dashboard;
+
+const normalizeCurrencyCode = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["usd", "eur", "gbp"].includes(normalized) ? normalized : "usd";
+};
+
+const BANK_TRANSFER_ACCOUNT_FIELDS = {
+  usd: [
+    { name: "usdBankName", prop: "bankName", label: "Bank Name" },
+    { name: "usdAccountName", prop: "accountName", label: "Account Name" },
+    { name: "usdAccountNumber", prop: "accountNumber", label: "Account Number" },
+    { name: "usdSwiftCode", prop: "swiftCode", label: "SWIFT / BIC" },
+  ],
+  eur: [
+    { name: "eurBankName", prop: "bankName", label: "Bank Name" },
+    { name: "eurAccountName", prop: "accountName", label: "Account Name" },
+    { name: "eurIban", prop: "iban", label: "IBAN", full: true },
+  ],
+  gbp: [
+    { name: "gbpBankName", prop: "bankName", label: "Bank Name" },
+    { name: "gbpAccountName", prop: "accountName", label: "Account Name" },
+    { name: "gbpAccountNumber", prop: "accountNumber", label: "Account Number" },
+    { name: "gbpSortCode", prop: "sortCode", label: "Sort Code" },
+  ],
+};
+
+const SETTINGS_SECTIONS = {
+  "general-settings": {
+    label: "General",
+    title: "General Settings",
+    description: "Manage language, visual theme, and shared operational defaults.",
+    submitLabel: "Save General Settings",
+  },
+  "payment-settings": {
+    label: "Payments",
+    title: "Payment Settings",
+    description: "Manage checkout methods and receiving accounts.",
+    submitLabel: "Save Changes",
+  },
+  "shipping-settings": {
+    label: "Shipping",
+    title: "Shipping Settings",
+    description: "Review shipping operations and the fields that appear across order workflows.",
+    submitLabel: "",
+  },
+  "account-settings": {
+    label: "Account",
+    title: "Account Settings",
+    description: "Maintain administrator credentials and recovery access.",
+    submitLabel: "Save Account Settings",
+  },
+};
+
+const isBankTransferCurrencyConfigured = (currencyKey, details) => {
+  const normalizedCurrency = normalizeCurrencyCode(currencyKey);
+  const config = details && typeof details === "object" ? details : {};
+  const requiredFields = BANK_TRANSFER_ACCOUNT_FIELDS[normalizedCurrency] || [];
+  return requiredFields.every((field) => String(config[field.prop] || "").trim());
+};
+
+const getBankTransferCurrencyState = (bankTransferSettings = {}) => {
+  const currencies = ["usd", "eur", "gbp"];
+  return currencies.map((currencyKey) => {
+    const details = bankTransferSettings[currencyKey] && typeof bankTransferSettings[currencyKey] === "object"
+      ? bankTransferSettings[currencyKey]
+      : {};
+    return {
+      key: currencyKey,
+      label: currencyKey.toUpperCase(),
+      configured: isBankTransferCurrencyConfigured(currencyKey, details),
+      details,
+    };
+  });
+};
+
+const getPaymentSettingsMethodState = (method, enabledPaymentKeys, bankTransferSettings) => {
+  const normalizedMethod = normalizePaymentMethodName(method.label);
+  const isEnabled = enabledPaymentKeys.has(normalizedMethod);
+
+  if (method.id === "paypal") {
+    return {
+      enabled: isEnabled,
+      status: isEnabled ? "Configured" : "Not configured",
+      note: method.description,
+      disabled: false,
+    };
+  }
+
+  if (method.id === "bank-transfer") {
+    const configuredCurrencies = getBankTransferCurrencyState(bankTransferSettings).filter((currency) => currency.configured);
+    return {
+      enabled: isEnabled,
+      status: configuredCurrencies.length ? "Configured" : "Incomplete",
+      note: method.description,
+      disabled: false,
+    };
+  }
+
+  return {
+    enabled: false,
+    status: "Coming soon",
+    note: "This provider is not connected to checkout yet.",
+    disabled: true,
+  };
+};
+
+const setAdminSidebarOpen = (open) => {
+  adminState.nav.drawerOpen = Boolean(open);
+  shell?.classList.toggle("is-sidebar-open", adminState.nav.drawerOpen);
+  document.body.classList.toggle("admin-sidebar-open", adminState.nav.drawerOpen);
+  shellToggle?.setAttribute("aria-expanded", String(adminState.nav.drawerOpen));
 };
 
 const persistNavGroupState = () => {
@@ -1771,6 +1925,94 @@ const renderNav = () => {
   navRoot.innerHTML = `${standaloneMarkup}${groupMarkup}`;
 };
 
+const renderAdminNavV4 = () => {
+  const activeNavSection = getAdminActiveNavSection();
+  const standaloneMarkup = navStructure.standalone
+    .map(
+      (item) => `
+        <button
+          type="button"
+          class="admin-nav-button admin-nav-item ${activeNavSection === item.id ? "is-active" : ""}"
+          data-section="${item.id}"
+          title="${escapeHtml(item.label)}"
+        >
+          <span class="admin-nav-icon" aria-hidden="true">${renderNavIcon(item.icon)}</span>
+          <span class="admin-nav-text">${escapeHtml(item.label)}</span>
+        </button>
+      `
+    )
+    .join("");
+
+  const groupMarkup = navStructure.groups
+    .map((group) => {
+      const expanded = isNavGroupExpanded(group.id, activeNavSection);
+      const hasActiveItem = group.items.some((item) => item.id === activeNavSection);
+
+      return `
+        <section class="admin-nav-group ${expanded ? "is-expanded" : ""} ${hasActiveItem ? "is-active-group" : ""}" data-group="${group.id}">
+          <button
+            type="button"
+            class="admin-nav-group-toggle"
+            data-nav-group-toggle="${group.id}"
+            aria-expanded="${expanded ? "true" : "false"}"
+          >
+            <span class="admin-nav-group-label">${escapeHtml(group.label)}</span>
+            <span class="admin-nav-chevron" aria-hidden="true">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m6 8 4 4 4-4"></path>
+              </svg>
+            </span>
+          </button>
+          <div class="admin-nav-group-items">
+            ${group.items
+              .map(
+                (item) => `
+                  <button
+                    type="button"
+                    class="admin-nav-button admin-nav-item admin-nav-item-child ${activeNavSection === item.id ? "is-active" : ""}"
+                    data-section="${item.id}"
+                    title="${escapeHtml(item.label)}"
+                  >
+                    <span class="admin-nav-icon" aria-hidden="true">${renderNavIcon(item.icon)}</span>
+                    <span class="admin-nav-text">${escapeHtml(item.label)}</span>
+                  </button>
+                `
+              )
+              .join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+
+  const utilityMarkup = (navStructure.utility || [])
+    .map(
+      (item) => `
+        <a
+          class="admin-nav-button admin-nav-link admin-nav-item admin-nav-item-utility"
+          href="${escapeHtml(item.href || "/")}"
+          ${item.external ? 'target="_blank" rel="noreferrer"' : ""}
+          title="${escapeHtml(item.label)}"
+        >
+          <span class="admin-nav-icon" aria-hidden="true">${renderNavIcon(item.icon)}</span>
+          <span class="admin-nav-text">${escapeHtml(item.label)}</span>
+        </a>
+      `
+    )
+    .join("");
+
+  navRoot.innerHTML = `
+    <div class="admin-nav-primary">
+      ${standaloneMarkup}
+      ${groupMarkup}
+    </div>
+    <div class="admin-nav-secondary">
+      <div class="admin-nav-separator" aria-hidden="true"></div>
+      ${utilityMarkup}
+    </div>
+  `;
+};
+
 const openAdminOrderDetail = async (orderId, routeMode = "push") => {
   const nextOrderId = String(orderId || "").trim();
   if (!nextOrderId) {
@@ -1857,11 +2099,13 @@ const applyBrand = (website) => {
 };
 
 const showLogin = () => {
+  setAdminSidebarOpen(false);
   shell?.classList.add("is-hidden");
   loginShell?.classList.remove("is-hidden");
 };
 
 const showShell = () => {
+  setAdminSidebarOpen(false);
   loginShell?.classList.add("is-hidden");
   shell?.classList.remove("is-hidden");
 };
@@ -3435,7 +3679,7 @@ const renderPaymentDetailSectionLegacy = async () => {
   document.querySelector("#payments-view-order-button")?.addEventListener("click", async () => {
     adminState.activeSection = "orders";
     adminState.orders.selectedId = payment.orderId;
-    renderNav();
+    renderAdminNavV4();
     updateTitle();
     await renderCurrentSection();
   });
@@ -8221,6 +8465,331 @@ const renderSettingsSection = async () => {
   });
 };
 
+const renderSettingsSectionV4 = async () => {
+  const settings = await window.NorthstarStore.getSettings();
+  const activeSettingsSection = SETTINGS_SECTIONS[getAdminActiveNavSection()]
+    ? getAdminActiveNavSection()
+    : "general-settings";
+  const meta = SETTINGS_SECTIONS[activeSettingsSection];
+  const enabledPaymentMethods = getEnabledPaymentMethods(settings.paymentMethods || ["PayPal", "Bank Transfer"]);
+  const enabledPaymentKeys = new Set(enabledPaymentMethods.map(normalizePaymentMethodName));
+  const bankTransferSettings = settings.bankTransferSettings || {};
+  const bankTransferCurrencies = getBankTransferCurrencyState(bankTransferSettings);
+  const configuredCurrencies = bankTransferCurrencies.filter((currency) => currency.configured);
+  const activeCurrency = bankTransferCurrencies.some((currency) => currency.key === adminState.settings.bankTransferCurrency)
+    ? adminState.settings.bankTransferCurrency
+    : "usd";
+  const activeCurrencyConfig = bankTransferCurrencies.find((currency) => currency.key === activeCurrency) || bankTransferCurrencies[0];
+  const activeCurrencyFields = BANK_TRANSFER_ACCOUNT_FIELDS[activeCurrencyConfig?.key || "usd"] || [];
+  const bankTransferEnabled = enabledPaymentKeys.has("bank transfer");
+  const bankTransferSummary = configuredCurrencies.length
+    ? configuredCurrencies.map((currency) => currency.label).join(", ")
+    : "No configured currencies yet";
+
+  const renderHeader = () => `
+    <header class="admin-page-head admin-settings-head">
+      <div>
+        <p class="admin-settings-kicker">${escapeHtml(meta.label)}</p>
+        <h2>${escapeHtml(meta.title)}</h2>
+        <p>${escapeHtml(meta.description)}</p>
+      </div>
+    </header>
+  `;
+
+  const renderGeneralSettings = () => `
+    ${renderHeader()}
+    <form class="admin-settings-shell" id="settings-form">
+      <section class="admin-panel admin-settings-panel">
+        <div class="admin-panel-header">
+          <div>
+            <h3>Regional Preferences</h3>
+            <p>Storefront language and theme values used across the admin shell and public site settings.</p>
+          </div>
+        </div>
+        <div class="admin-form-grid">
+          <label>
+            Website Language
+            <input type="text" name="language" value="${escapeHtml(settings.language || "")}">
+          </label>
+          <label>
+            Theme Color
+            <input type="text" name="themeColor" value="${escapeHtml(settings.themeColor || "")}">
+          </label>
+        </div>
+      </section>
+      <section class="admin-panel admin-settings-panel">
+        <div class="admin-panel-header">
+          <div>
+            <h3>System Configuration</h3>
+            <p>Internal operational notes kept with the site configuration.</p>
+          </div>
+        </div>
+        <label class="full">
+          System Config
+          <textarea name="systemConfig" rows="9">${escapeHtml(settings.systemConfig || "")}</textarea>
+        </label>
+      </section>
+      <div class="admin-actions-inline">
+        <button class="admin-primary-button" type="submit">${escapeHtml(meta.submitLabel)}</button>
+      </div>
+      <p class="admin-form-status" id="settings-form-status"></p>
+    </form>
+  `;
+
+  const renderAccountSettings = () => `
+    ${renderHeader()}
+    <form class="admin-settings-shell" id="settings-form">
+      <section class="admin-panel admin-settings-panel">
+        <div class="admin-panel-header">
+          <div>
+            <h3>Administrator Access</h3>
+            <p>Update the credentials used to sign in to the admin dashboard.</p>
+          </div>
+        </div>
+        <div class="admin-form-grid">
+          <label>
+            Admin Email
+            <input type="email" name="adminEmail" value="${escapeHtml(settings.adminEmail || "")}" required>
+          </label>
+          <label>
+            Password
+            <input type="password" name="adminPassword" value="${escapeHtml(settings.adminPassword || "")}" required autocomplete="new-password">
+          </label>
+          <label class="full">
+            Recovery Email
+            <input type="email" name="recoveryEmail" value="${escapeHtml(settings.recoveryEmail || "")}">
+          </label>
+        </div>
+      </section>
+      <div class="admin-actions-inline">
+        <button class="admin-primary-button" type="submit">${escapeHtml(meta.submitLabel)}</button>
+      </div>
+      <p class="admin-form-status" id="settings-form-status"></p>
+    </form>
+  `;
+
+  const renderShippingSettings = () => `
+    ${renderHeader()}
+    <section class="admin-panel admin-settings-panel">
+      <div class="admin-panel-header">
+        <div>
+          <h3>Shipping Operations</h3>
+          <p>Shipping statuses, lead times, and carrier data are managed directly through orders, products, and payment confirmation workflows.</p>
+        </div>
+      </div>
+      <div class="admin-settings-empty">
+        <strong>No standalone shipping settings yet</strong>
+        <p>Use Orders and Products to manage lead time, status progression, and fulfillment-specific information without introducing duplicate configuration screens.</p>
+      </div>
+    </section>
+  `;
+
+  const renderPaymentSettings = () => `
+    ${renderHeader()}
+    <form class="admin-settings-shell" id="settings-form">
+      <section class="admin-panel admin-settings-panel">
+        <div class="admin-panel-header">
+          <div>
+            <h3>Payment Methods</h3>
+            <p>Enable only the payment providers that are ready to appear in checkout and customer payment flows.</p>
+          </div>
+        </div>
+        <div class="admin-payment-method-list">
+          ${ADMIN_PAYMENT_METHOD_OPTIONS.map((method) => {
+            const state = getPaymentSettingsMethodState(method, enabledPaymentKeys, bankTransferSettings);
+            return `
+              <label class="admin-payment-method-row ${state.disabled ? "is-disabled" : ""}">
+                <div class="admin-payment-method-info">
+                  <div class="admin-payment-method-heading">
+                    <h4>${escapeHtml(method.label)}</h4>
+                    <span class="admin-method-status-badge ${state.status === "Configured" ? "is-success" : state.status === "Incomplete" ? "is-warning" : ""}">${escapeHtml(state.status)}</span>
+                  </div>
+                  <p>${escapeHtml(state.note)}</p>
+                </div>
+                <span class="admin-switch ${state.disabled ? "is-disabled" : ""}" aria-hidden="true">
+                  <input
+                    type="checkbox"
+                    name="${state.disabled ? "" : "paymentMethods"}"
+                    value="${escapeHtml(method.label)}"
+                    ${state.enabled ? "checked" : ""}
+                    ${state.disabled ? "disabled" : ""}
+                  >
+                  <span class="admin-switch-track"></span>
+                  <span class="admin-switch-thumb"></span>
+                </span>
+              </label>
+            `;
+          }).join("")}
+        </div>
+      </section>
+
+      <section class="admin-panel admin-settings-panel">
+        <div class="admin-panel-header">
+          <div>
+            <h3>Bank Transfer Accounts</h3>
+            <p>Configure the receiving account shown to customers when Bank Transfer is selected.</p>
+          </div>
+        </div>
+        <div class="admin-settings-summary-row">
+          <div class="admin-settings-summary-card">
+            <span>Bank Transfer</span>
+            <strong>${bankTransferEnabled ? "Enabled" : "Disabled"}</strong>
+          </div>
+          <div class="admin-settings-summary-card">
+            <span>Configured currencies</span>
+            <strong>${escapeHtml(bankTransferSummary)}</strong>
+          </div>
+        </div>
+        ${bankTransferEnabled && !configuredCurrencies.length ? `
+          <div class="admin-settings-warning">
+            <strong>Configuration needed</strong>
+            <p>Bank Transfer is enabled, but no complete receiving account is available yet. Customers will be blocked from incomplete bank instructions until one currency is fully configured.</p>
+          </div>
+        ` : ""}
+        <div class="admin-settings-tab-row" role="tablist" aria-label="Bank transfer currencies">
+          ${bankTransferCurrencies.map((currency) => `
+            <button
+              type="button"
+              class="admin-settings-tab ${currency.key === activeCurrencyConfig.key ? "is-active" : ""}"
+              data-bank-currency="${currency.key}"
+              aria-selected="${currency.key === activeCurrencyConfig.key ? "true" : "false"}"
+            >
+              <span>${currency.label}</span>
+              <small>${currency.configured ? "Configured" : "Incomplete"}</small>
+            </button>
+          `).join("")}
+        </div>
+        <div class="admin-payment-account-shell">
+          <div class="admin-payment-account-header">
+            <div>
+              <h4>${escapeHtml(activeCurrencyConfig.label)} Receiving Account</h4>
+              <p>Only this currency form is shown at a time to keep real banking details readable.</p>
+            </div>
+          </div>
+          <div class="admin-form-grid">
+            ${activeCurrencyFields.map((field) => `
+              <label class="${field.full ? "full" : ""}">
+                ${escapeHtml(field.label)}
+                <input
+                  type="text"
+                  name="${escapeHtml(field.name)}"
+                  value="${escapeHtml(activeCurrencyConfig.details[field.prop] || "")}"
+                >
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      </section>
+
+      <div class="admin-actions-inline">
+        <button class="admin-primary-button" type="submit">${escapeHtml(meta.submitLabel)}</button>
+      </div>
+      <p class="admin-form-status" id="settings-form-status"></p>
+    </form>
+  `;
+
+  if (activeSettingsSection === "general-settings") {
+    contentRoot.innerHTML = renderGeneralSettings();
+  } else if (activeSettingsSection === "account-settings") {
+    contentRoot.innerHTML = renderAccountSettings();
+  } else if (activeSettingsSection === "shipping-settings") {
+    contentRoot.innerHTML = renderShippingSettings();
+  } else {
+    contentRoot.innerHTML = renderPaymentSettings();
+  }
+
+  contentRoot.querySelectorAll("[data-bank-currency]")?.forEach((tabButton) => {
+    tabButton.addEventListener("click", () => {
+      adminState.settings.bankTransferCurrency = normalizeCurrencyCode(tabButton.dataset.bankCurrency);
+      renderSettingsSectionV4().catch((error) => console.error("[admin] settings rerender failed", error));
+    });
+  });
+
+  const form = document.querySelector("#settings-form");
+  if (!form) {
+    return;
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const submitButton = form.querySelector('button[type="submit"]');
+    const statusNode = document.querySelector("#settings-form-status");
+
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = "Saving...";
+    }
+    if (statusNode) {
+      statusNode.textContent = "Saving settings...";
+      statusNode.dataset.state = "saving";
+    }
+
+    try {
+      const selectedPaymentMethods = getEnabledPaymentMethods(formData.getAll("paymentMethods"));
+      const partial =
+        activeSettingsSection === "general-settings"
+          ? {
+              language: formData.get("language"),
+              themeColor: formData.get("themeColor"),
+              systemConfig: formData.get("systemConfig"),
+            }
+          : activeSettingsSection === "account-settings"
+            ? {
+                adminEmail: formData.get("adminEmail"),
+                adminPassword: formData.get("adminPassword"),
+                recoveryEmail: formData.get("recoveryEmail"),
+              }
+            : {
+                paymentMethods: selectedPaymentMethods,
+                bankTransferSettings: {
+                  providerName: String(bankTransferSettings.providerName || "").trim(),
+                  usd: {
+                    bankName: formData.get("usdBankName") ?? bankTransferSettings?.usd?.bankName ?? "",
+                    accountName: formData.get("usdAccountName") ?? bankTransferSettings?.usd?.accountName ?? "",
+                    accountNumber: formData.get("usdAccountNumber") ?? bankTransferSettings?.usd?.accountNumber ?? "",
+                    swiftCode: formData.get("usdSwiftCode") ?? bankTransferSettings?.usd?.swiftCode ?? "",
+                  },
+                  eur: {
+                    bankName: formData.get("eurBankName") ?? bankTransferSettings?.eur?.bankName ?? "",
+                    accountName: formData.get("eurAccountName") ?? bankTransferSettings?.eur?.accountName ?? "",
+                    iban: formData.get("eurIban") ?? bankTransferSettings?.eur?.iban ?? "",
+                  },
+                  gbp: {
+                    bankName: formData.get("gbpBankName") ?? bankTransferSettings?.gbp?.bankName ?? "",
+                    accountName: formData.get("gbpAccountName") ?? bankTransferSettings?.gbp?.accountName ?? "",
+                    accountNumber: formData.get("gbpAccountNumber") ?? bankTransferSettings?.gbp?.accountNumber ?? "",
+                    sortCode: formData.get("gbpSortCode") ?? bankTransferSettings?.gbp?.sortCode ?? "",
+                  },
+                },
+              };
+
+      const updatedSettings = await window.NorthstarStore.updateSettings(partial);
+      if (updatedSettings?.reauthRequired) {
+        showLogin();
+        return;
+      }
+
+      if (statusNode) {
+        statusNode.textContent = "Settings saved.";
+        statusNode.dataset.state = "success";
+      }
+
+      await renderCurrentSection();
+    } catch (error) {
+      if (statusNode) {
+        statusNode.textContent = error?.message || "Unable to save settings.";
+        statusNode.dataset.state = "error";
+      }
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = meta.submitLabel || "Save Changes";
+      }
+    }
+  });
+};
+
 const renderCurrentSection = async () => {
   const session = await window.NorthstarStore?.refreshAdminSession?.();
 
@@ -8235,7 +8804,7 @@ const renderCurrentSection = async () => {
   }
 
   syncAdminRoute("replace");
-  renderNav();
+  renderAdminNavV4();
   updateTitle();
   renderLoading();
 
@@ -8281,7 +8850,7 @@ const renderCurrentSection = async () => {
     return;
   }
 
-  await renderSettingsSection();
+  await renderSettingsSectionV4();
 };
 
 const boot = async () => {
@@ -8357,7 +8926,7 @@ navRoot?.addEventListener("click", async (event) => {
     const groupId = String(groupToggle.getAttribute("data-nav-group-toggle") || "").trim();
     if (groupId) {
       setNavGroupExpanded(groupId, !isNavGroupExpanded(groupId));
-      renderNav();
+      renderAdminNavV4();
     }
     return;
   }
@@ -8393,8 +8962,19 @@ navRoot?.addEventListener("click", async (event) => {
   }
 
   syncAdminRoute("push");
+  if (isAdminSidebarDrawerViewport()) {
+    setAdminSidebarOpen(false);
+  }
 
   await renderCurrentSection();
+});
+
+shellToggle?.addEventListener("click", () => {
+  setAdminSidebarOpen(!adminState.nav.drawerOpen);
+});
+
+sidebarBackdrop?.addEventListener("click", () => {
+  setAdminSidebarOpen(false);
 });
 
 themeToggle?.addEventListener("click", () => {
@@ -8461,6 +9041,12 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest(".admin-global-search")) globalSearchResults?.classList.add("is-hidden");
 });
 
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && adminState.nav.drawerOpen) {
+    setAdminSidebarOpen(false);
+  }
+});
+
 logoutButton?.addEventListener("click", async () => {
   await window.NorthstarStore?.logoutAdmin();
   showLogin();
@@ -8492,8 +9078,15 @@ window.addEventListener("focus", async () => {
 
 window.addEventListener("popstate", async () => {
   hydrateAdminRouteFromLocation();
+  setAdminSidebarOpen(false);
   if (await window.NorthstarStore?.refreshAdminSession?.()) {
     await renderCurrentSection();
+  }
+});
+
+window.addEventListener("resize", () => {
+  if (!isAdminSidebarDrawerViewport() && adminState.nav.drawerOpen) {
+    setAdminSidebarOpen(false);
   }
 });
 
