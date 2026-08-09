@@ -3598,16 +3598,16 @@ textarea {
   }
 }
 
-/* Support UI V3 rebuild */
+/* Support UI V4 rebuild */
 .admin-support-shell {
   --support-header-offset: 164px;
   height: calc(100vh - var(--support-header-offset));
-  min-height: 620px;
+  min-height: 640px;
 }
 
 .admin-support-shell .admin-chat-layout.admin-support-layout {
   display: grid;
-  grid-template-columns: 300px minmax(650px, 1fr) 300px;
+  grid-template-columns: 300px minmax(0, 1fr) 320px;
   gap: 18px;
   height: 100%;
   min-height: 0;
@@ -3637,6 +3637,7 @@ textarea {
 .admin-support-shell .admin-thread-panel {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
+  width: 300px;
 }
 
 .admin-support-shell .admin-thread-panel-head {
@@ -3647,7 +3648,9 @@ textarea {
 .admin-support-shell .admin-thread-panel-header h3,
 .admin-support-shell .admin-customer-crm-section h4,
 .admin-support-shell .admin-chat-header-title,
-.admin-support-shell .admin-thread-topline strong {
+.admin-support-shell .admin-thread-topline strong,
+.admin-support-shell .admin-customer-profile-copy h3 {
+  white-space: nowrap;
   overflow: visible;
   line-height: 1.25;
 }
@@ -3679,6 +3682,7 @@ textarea {
   gap: 10px;
   min-height: 0;
   padding: 2px 0 0;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 
@@ -3723,6 +3727,7 @@ textarea {
   display: grid;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .admin-support-shell .admin-thread-topline,
@@ -3736,12 +3741,17 @@ textarea {
 .admin-support-shell .admin-thread-topline strong {
   min-width: 0;
   font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-support-shell .admin-thread-topline small,
 .admin-support-shell .admin-thread-email {
   color: var(--text-faint);
   font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-support-shell .admin-thread-preview {
@@ -3763,8 +3773,11 @@ textarea {
 }
 
 .admin-support-shell .admin-chat-panel {
-  grid-template-rows: 80px minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .admin-support-shell .admin-chat-header {
@@ -3772,9 +3785,11 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 14px;
-  min-height: 80px;
+  min-height: 90px;
+  max-height: 90px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
+  overflow: hidden;
 }
 
 .admin-support-shell .admin-chat-header-profile {
@@ -3800,6 +3815,7 @@ textarea {
   display: grid;
   gap: 4px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .admin-support-shell .admin-chat-header-topline {
@@ -3807,27 +3823,26 @@ textarea {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .admin-support-shell .admin-chat-header-title {
   min-width: 0;
   font-size: 1.08rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.admin-support-shell .admin-chat-header-email,
-.admin-support-shell .admin-chat-header-summary {
+.admin-support-shell .admin-chat-header-email {
   margin: 0;
   min-width: 0;
   color: var(--text-soft);
   font-size: 0.82rem;
   line-height: 1.4;
-}
-
-.admin-support-shell .admin-chat-header-summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-support-shell .admin-chat-live-chip {
@@ -3844,11 +3859,12 @@ textarea {
 .admin-support-shell .admin-chat-header-meta {
   display: grid;
   gap: 6px;
-  min-width: 130px;
+  min-width: 150px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #f8fafc;
+  flex-shrink: 0;
 }
 
 .admin-support-shell .admin-chat-header-brief {
@@ -3873,6 +3889,8 @@ textarea {
   justify-content: end;
   gap: 8px;
   flex-wrap: wrap;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .admin-support-shell .admin-chat-header-actions label {
@@ -3881,6 +3899,7 @@ textarea {
 }
 
 .admin-support-shell .admin-chat-history {
+  flex: 1;
   min-height: 0;
   margin: 16px 0;
   padding: 18px;
@@ -3914,6 +3933,7 @@ textarea {
 
 .admin-support-shell .admin-chat-footer {
   position: relative;
+  flex-shrink: 0;
   display: grid;
   gap: 10px;
   padding-top: 14px;
@@ -3968,13 +3988,16 @@ textarea {
 
 .admin-support-shell .admin-customer-panel {
   grid-template-rows: minmax(0, 1fr);
+  width: 320px;
 }
 
 .admin-support-shell .admin-customer-crm-card {
   display: grid;
   gap: 12px;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
+  padding-right: 2px;
 }
 
 .admin-support-shell .admin-customer-crm-hero {
@@ -3994,11 +4017,16 @@ textarea {
 .admin-support-shell .admin-customer-profile-copy h3 {
   font-size: 1rem;
   line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-support-shell .admin-customer-profile-copy p {
   font-size: 0.82rem;
   line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-support-shell .admin-customer-profile-badges {
@@ -4044,7 +4072,8 @@ textarea {
 .admin-support-shell .admin-linked-record-side span,
 .admin-support-shell .admin-linked-record-side small {
   line-height: 1.4;
-  overflow: visible;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-support-shell .admin-support-order-list {
@@ -4064,7 +4093,7 @@ textarea {
 
 @media (max-width: 1200px) {
   .admin-support-shell .admin-chat-layout.admin-support-layout {
-    grid-template-columns: 280px minmax(520px, 1fr) 280px;
+    grid-template-columns: 280px minmax(0, 1fr) 300px;
   }
 }
 
@@ -4088,7 +4117,7 @@ textarea {
   }
 
   .admin-support-shell .admin-chat-panel {
-    grid-template-rows: auto minmax(320px, 1fr) auto;
+    min-height: 520px;
   }
 
   .admin-support-shell .admin-chat-header {
@@ -4115,10 +4144,13 @@ textarea {
 
   .admin-support-shell .admin-thread-filter-row-v2,
   .admin-support-shell .admin-thread-topline,
-  .admin-support-shell .admin-thread-bottomline,
-  .admin-support-shell .admin-chat-composer-actions {
+  .admin-support-shell .admin-thread-bottomline {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .admin-support-shell .admin-chat-composer-actions {
+    justify-content: flex-start;
   }
 
   .admin-support-shell .admin-chat-bubble {

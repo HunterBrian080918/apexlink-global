@@ -5261,10 +5261,6 @@ const renderCustomersSectionView = (options = {}) => {
                           )}</span>
                         </div>
                         <p class="admin-chat-header-email">${escapeHtml(selected.email || "No email")}</p>
-                        <div class="admin-chat-header-summary">
-                          ${selected.country ? `<span class="admin-chat-header-country">${escapeHtml(selected.country)}</span>` : ""}
-                          <span>${escapeHtml(getAdminConversationContextLabel(selected))}</span>
-                        </div>
                       </div>
                     </div>
                     <div class="admin-chat-header-meta">
