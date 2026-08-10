@@ -999,6 +999,10 @@ const normalizePaymentMethodName = (value) =>
     .toLowerCase()
     .replace(/[_-]+/g, " ");
 
+const SUPPORTED_ADMIN_PAYMENT_METHODS = new Set(
+  ["PayPal", "Bank Transfer"].map((method) => normalizePaymentMethodName(method))
+);
+
 const getEnabledPaymentMethods = (methods) => {
   const seen = new Set();
   return (Array.isArray(methods) ? methods : [])
@@ -1006,7 +1010,7 @@ const getEnabledPaymentMethods = (methods) => {
     .filter(Boolean)
     .filter((item) => {
       const normalized = normalizePaymentMethodName(item);
-      if (!normalized || seen.has(normalized)) {
+      if (!normalized || seen.has(normalized) || !SUPPORTED_ADMIN_PAYMENT_METHODS.has(normalized)) {
         return false;
       }
       seen.add(normalized);

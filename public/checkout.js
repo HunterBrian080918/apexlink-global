@@ -26,7 +26,9 @@ let quantityValidationTimer;
 let isSubmittingOrder = false;
 let currentCheckoutPaymentMethod = "PayPal";
 let currentSiteSettings = null;
+const IMPLEMENTED_CHECKOUT_PAYMENT_METHODS = ["PayPal", "Bank Transfer"];
 const RETAIL_CHECKOUT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer"];
+const WHOLESALE_CHECKOUT_SUPPORTED_METHODS = ["Bank Transfer", "PayPal"];
 
 const setCheckoutActionState = (label = "", disabled = false) => {
   if (checkoutActionButton) {
@@ -52,17 +54,23 @@ const normalizePaymentMethodName = (value) =>
     .replace(/[_-]+/g, " ");
 
 const getConfiguredCheckoutPaymentMethods = () => {
-  if (!Array.isArray(currentSiteSettings?.paymentMethods)) {
-    return RETAIL_CHECKOUT_SUPPORTED_METHODS.slice();
-  }
+  const baseMethods = Array.isArray(currentSiteSettings?.paymentMethods)
+    ? currentSiteSettings.paymentMethods
+    : IMPLEMENTED_CHECKOUT_PAYMENT_METHODS;
 
   const seen = new Set();
-  return currentSiteSettings.paymentMethods
+  return baseMethods
     .map((item) => String(item || "").trim())
     .filter(Boolean)
     .filter((item) => {
       const normalized = normalizePaymentMethodName(item);
-      if (!normalized || seen.has(normalized)) {
+      if (
+        !normalized ||
+        seen.has(normalized) ||
+        !IMPLEMENTED_CHECKOUT_PAYMENT_METHODS.some(
+          (supportedMethod) => normalizePaymentMethodName(supportedMethod) === normalized
+        )
+      ) {
         return false;
       }
       seen.add(normalized);
@@ -272,25 +280,24 @@ const getCheckoutViewModel = (product, mode, quantity = 1) => {
 const getPaymentUrl = (productId, mode) =>
   `${routes.payment || "/payment"}?id=${encodeURIComponent(productId)}&mode=${encodeURIComponent(mode)}`;
 
-const getRetailCheckoutPaymentMethods = () =>
-  getConfiguredCheckoutPaymentMethods().filter((method) =>
-    RETAIL_CHECKOUT_SUPPORTED_METHODS.some(
-      (supportedMethod) => normalizePaymentMethodName(supportedMethod) === normalizePaymentMethodName(method)
+const getCheckoutPaymentMethods = (mode) => {
+  const supportedMethods =
+    mode === "wholesale" ? WHOLESALE_CHECKOUT_SUPPORTED_METHODS : RETAIL_CHECKOUT_SUPPORTED_METHODS;
+  const configuredMethods = getConfiguredCheckoutPaymentMethods();
+
+  return supportedMethods.filter((supportedMethod) =>
+    configuredMethods.some(
+      (configuredMethod) => normalizePaymentMethodName(configuredMethod) === normalizePaymentMethodName(supportedMethod)
     )
   );
+};
 
 const renderCheckoutPaymentMethods = () => {
   if (!checkoutPaymentMethods || !checkoutPaymentMethodGrid) {
     return;
   }
 
-  if (currentPurchaseMode !== "retail") {
-    checkoutPaymentMethods.hidden = true;
-    checkoutPaymentMethodGrid.innerHTML = "";
-    return;
-  }
-
-  const availableMethods = getRetailCheckoutPaymentMethods();
+  const availableMethods = getCheckoutPaymentMethods(currentPurchaseMode);
   currentCheckoutPaymentMethod = availableMethods.includes(currentCheckoutPaymentMethod)
     ? currentCheckoutPaymentMethod
     : availableMethods[0] || "";
@@ -371,17 +378,20 @@ const renderTotals = () => {
 };
 
 const syncCheckoutModeUi = () => {
-  if (currentPurchaseMode === "retail") {
-    const availableMethods = getRetailCheckoutPaymentMethods();
-    currentCheckoutPaymentMethod = getSelectedCheckoutPaymentMethod();
-    if (!availableMethods.length) {
-      setCheckoutActionState("No Payment Methods Available", true);
-      if (checkoutNextStepNote) {
-        checkoutNextStepNote.textContent =
-          "No retail payment methods are currently enabled. Please contact our team for manual assistance.";
-      }
-      return;
+  const availableMethods = getCheckoutPaymentMethods(currentPurchaseMode);
+  currentCheckoutPaymentMethod = getSelectedCheckoutPaymentMethod();
+  if (!availableMethods.length) {
+    setCheckoutActionState("No Payment Methods Available", true);
+    if (checkoutNextStepNote) {
+      checkoutNextStepNote.textContent =
+        currentPurchaseMode === "wholesale"
+          ? "No wholesale payment methods are currently enabled. Please contact our team for manual assistance."
+          : "No retail payment methods are currently enabled. Please contact our team for manual assistance.";
     }
+    return;
+  }
+
+  if (currentPurchaseMode === "retail") {
     const isBankTransfer = currentCheckoutPaymentMethod === "Bank Transfer";
     setCheckoutActionState(
       isSubmittingOrder
@@ -403,7 +413,10 @@ const syncCheckoutModeUi = () => {
 
   setCheckoutActionState(isSubmittingOrder ? "Creating order..." : "Continue to Payment", isSubmittingOrder);
   if (checkoutNextStepNote) {
-    checkoutNextStepNote.textContent = "Your order details will be reviewed on the next step before any payment method is selected.";
+    checkoutNextStepNote.textContent =
+      currentCheckoutPaymentMethod === "Bank Transfer"
+        ? "Your wholesale order will be created first, then you will be redirected to bank transfer instructions on the payment page."
+        : "Your wholesale order will be created first, then you will continue to the payment page to confirm PayPal.";
   }
 };
 
@@ -483,9 +496,12 @@ const setupCheckoutForm = () => {
       return;
     }
 
-    if (currentPurchaseMode === "retail" && !getRetailCheckoutPaymentMethods().length) {
+    if (!getCheckoutPaymentMethods(currentPurchaseMode).length) {
       if (checkoutStatus) {
-        checkoutStatus.textContent = "No retail payment methods are currently enabled.";
+        checkoutStatus.textContent =
+          currentPurchaseMode === "wholesale"
+            ? "No wholesale payment methods are currently enabled."
+            : "No retail payment methods are currently enabled.";
       }
       return;
     }
@@ -539,7 +555,7 @@ const setupCheckoutForm = () => {
             productId: currentProduct.id,
             quantity: String(quantity),
             message: String(formData.get("notes") || "").trim(),
-            paymentMethod: currentPurchaseMode === "retail" ? currentCheckoutPaymentMethod : "",
+            paymentMethod: currentCheckoutPaymentMethod,
           },
         }),
       });

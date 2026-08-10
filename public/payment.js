@@ -15,6 +15,7 @@ const bankTransferPanel = document.querySelector("#bank-transfer-panel");
 const routes = window.ApexLinkRoutes || {
   products: "/products",
   checkout: "/checkout",
+  detail: "/detail",
 };
 
 let currentOrder = null;
@@ -25,7 +26,9 @@ let currentSiteSettings = null;
 let isCapturingPayPal = false;
 const BANK_TRANSFER_PROVIDER = "bank_transfer";
 const WORLD_FIRST_SETTLEMENT_CHANNEL = "WorldFirst";
+const IMPLEMENTED_PAYMENT_METHODS = ["PayPal", "Bank Transfer"];
 const RETAIL_PAYMENT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer"];
+const WHOLESALE_PAYMENT_SUPPORTED_METHODS = ["Bank Transfer", "PayPal"];
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -96,17 +99,23 @@ const normalizePaymentMethodKey = (value) =>
     .toLowerCase()
     .replace(/[_-]+/g, " ");
 const getConfiguredPaymentMethods = () => {
-  if (!Array.isArray(currentSiteSettings?.paymentMethods)) {
-    return RETAIL_PAYMENT_SUPPORTED_METHODS.slice();
-  }
+  const baseMethods = Array.isArray(currentSiteSettings?.paymentMethods)
+    ? currentSiteSettings.paymentMethods
+    : IMPLEMENTED_PAYMENT_METHODS;
 
   const seen = new Set();
-  return currentSiteSettings.paymentMethods
+  return baseMethods
     .map((item) => String(item || "").trim())
     .filter(Boolean)
     .filter((item) => {
       const normalized = normalizePaymentMethodKey(item);
-      if (!normalized || seen.has(normalized)) {
+      if (
+        !normalized ||
+        seen.has(normalized) ||
+        !IMPLEMENTED_PAYMENT_METHODS.some(
+          (supportedMethod) => normalizePaymentMethodKey(supportedMethod) === normalized
+        )
+      ) {
         return false;
       }
       seen.add(normalized);
@@ -183,15 +192,12 @@ const formatCurrency = (value) => `$${Number(String(value || "").replace(/[^\d.-
 
 const getPaymentMethods = (mode) => {
   const configured = getConfiguredPaymentMethods();
-  if (mode === "retail") {
-    return configured.filter((method) =>
-      RETAIL_PAYMENT_SUPPORTED_METHODS.some(
-        (supportedMethod) => normalizePaymentMethodKey(supportedMethod) === normalizePaymentMethodKey(method)
-      )
-    );
-  }
-
-  return configured;
+  const supportedMethods = mode === "retail" ? RETAIL_PAYMENT_SUPPORTED_METHODS : WHOLESALE_PAYMENT_SUPPORTED_METHODS;
+  return supportedMethods.filter((supportedMethod) =>
+    configured.some(
+      (configuredMethod) => normalizePaymentMethodKey(configuredMethod) === normalizePaymentMethodKey(supportedMethod)
+    )
+  );
 };
 
 const hasDepositConfiguration = (order) => {
@@ -587,10 +593,30 @@ const renderEmptyState = (message = "Please complete the checkout details step b
   }
 };
 
-const buildCheckoutUrl = (order) =>
-  `${routes.checkout || "/checkout"}?id=${encodeURIComponent(order.productId)}&mode=${encodeURIComponent(
-    order.purchaseMode || "retail"
-  )}`;
+const buildProductFallbackUrl = (order, product) => {
+  const detailBase = String(routes.detail || "/detail").trim();
+  const productsBase = String(routes.products || "/products").trim() || "/products";
+  const productId = String(order?.productId || product?.id || "").trim();
+
+  if (detailBase && productId) {
+    return `${detailBase}?id=${encodeURIComponent(productId)}`;
+  }
+
+  return productsBase;
+};
+
+const buildCheckoutUrl = (order, product) => {
+  const checkoutBase = String(routes.checkout || "").trim();
+  const productId = String(order?.productId || product?.id || "").trim();
+  const purchaseMode = String(order?.purchaseMode || "").trim().toLowerCase();
+  const mode = purchaseMode === "wholesale" ? "wholesale" : purchaseMode === "retail" ? "retail" : "";
+
+  if (checkoutBase && productId && mode) {
+    return `${checkoutBase}?id=${encodeURIComponent(productId)}&mode=${encodeURIComponent(mode)}`;
+  }
+
+  return buildProductFallbackUrl(order, product);
+};
 
 const setupPaymentForm = () => {
   paymentForm?.addEventListener("submit", async (event) => {
@@ -826,6 +852,9 @@ const initPaymentPage = async () => {
 
   currentProduct = await store.getProductById(currentOrder.productId);
   if (!currentProduct) {
+    if (backLink) {
+      backLink.href = buildProductFallbackUrl(currentOrder, null);
+    }
     renderEmptyState("The selected product for this order could not be loaded.");
     return;
   }
@@ -834,7 +863,7 @@ const initPaymentPage = async () => {
   currentPayments = await fetchOrderPayments(currentOrder.id);
   const activeBankTransferPayment = getPendingBankTransferPayment(currentPayments);
   if (backLink) {
-    backLink.href = buildCheckoutUrl(currentOrder);
+    backLink.href = buildCheckoutUrl(currentOrder, currentProduct);
   }
 
   renderProductSummary(currentProduct, currentOrder);

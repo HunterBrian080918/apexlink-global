@@ -864,6 +864,23 @@
   const normalizeSettings = (value) => {
     const settings = asObject(value);
     const bankTransferSettings = asObject(settings.bankTransferSettings);
+    const SUPPORTED_PAYMENT_METHODS = new Set(["paypal", "bank transfer"]);
+    const normalizePaymentMethodName = (method) =>
+      String(method || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[_-]+/g, " ");
+    const filterSupportedPaymentMethods = (methods) => {
+      const seen = new Set();
+      return asStringArray(methods || ["PayPal", "Bank Transfer"]).filter((method) => {
+        const normalized = normalizePaymentMethodName(method);
+        if (!normalized || seen.has(normalized) || !SUPPORTED_PAYMENT_METHODS.has(normalized)) {
+          return false;
+        }
+        seen.add(normalized);
+        return true;
+      });
+    };
     const normalizeBankTransferCurrency = (currency, fields) => {
       const source = asObject(currency);
       return fields.reduce((accumulator, field) => {
@@ -876,7 +893,7 @@
       adminEmail: "",
       adminPassword: "",
       recoveryEmail: normalizeEmailContact(settings.recoveryEmail),
-      paymentMethods: asStringArray(settings.paymentMethods || ["PayPal", "Bank Transfer"]),
+      paymentMethods: filterSupportedPaymentMethods(settings.paymentMethods),
       language: String(settings.language || "English"),
       themeColor: String(settings.themeColor || "#111827"),
       systemConfig: String(settings.systemConfig || ""),
