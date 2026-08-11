@@ -29,6 +29,10 @@ const WORLD_FIRST_SETTLEMENT_CHANNEL = "WorldFirst";
 const IMPLEMENTED_PAYMENT_METHODS = ["PayPal", "Bank Transfer"];
 const RETAIL_PAYMENT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer"];
 const WHOLESALE_PAYMENT_SUPPORTED_METHODS = ["Bank Transfer", "PayPal"];
+const PAYMENT_METHOD_COPY = {
+  paypal: "Pay securely with PayPal",
+  "bank transfer": "Pay through international wire transfer",
+};
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -189,6 +193,7 @@ const setupRevealAnimations = () => {
 };
 
 const formatCurrency = (value) => `$${Number(String(value || "").replace(/[^\d.-]/g, "") || 0).toFixed(2)}`;
+const getPaymentMethodDescription = (method) => PAYMENT_METHOD_COPY[normalizePaymentMethodKey(method)] || "Secure payment method";
 
 const getPaymentMethods = (mode) => {
   const configured = getConfiguredPaymentMethods();
@@ -280,7 +285,10 @@ const renderPaymentMethods = (mode, selectedMethod = "", options = {}) => {
             ${lockedMethod ? "disabled" : ""}
           >
           <span class="payment-method-indicator" aria-hidden="true"></span>
-          <span class="payment-method-label">${escapeHtml(method)}</span>
+          <span class="payment-method-copy">
+            <span class="payment-method-label">${escapeHtml(method)}</span>
+            <span class="payment-method-description">${escapeHtml(getPaymentMethodDescription(method))}</span>
+          </span>
         </label>
       `
     )
@@ -336,7 +344,7 @@ const setSubmitButtonState = () => {
 
   if (currentOrder.purchaseMode === "retail") {
     submitButton.disabled = false;
-    submitButton.textContent = selectedMethod === "Bank Transfer" ? "Confirm Bank Transfer" : "Continue to PayPal";
+    submitButton.textContent = selectedMethod === "Bank Transfer" ? "Continue with Bank Transfer" : "Pay with PayPal";
     return;
   }
 
@@ -345,8 +353,8 @@ const setSubmitButtonState = () => {
   submitButton.textContent = isComplete
     ? "Payment Method Confirmed"
     : selectedMethod === "Bank Transfer"
-      ? "Confirm Bank Transfer"
-      : "Confirm Payment Method";
+      ? "Submit Bank Transfer Order"
+      : "Pay with PayPal";
 };
 
 const renderBuyerDetails = (order) => {
@@ -355,33 +363,36 @@ const renderBuyerDetails = (order) => {
   }
 
   buyerDetailsRoot.innerHTML = `
-    <strong>Buyer and Shipping Details</strong>
-    <div class="checkout-summary-facts compact">
-      <div>
-        <span>Buyer</span>
-        <strong>${escapeHtml(order.customerName || "-")}</strong>
-      </div>
-      <div>
+    <div class="payment-customer-card-head">
+      <strong>Customer information</strong>
+      <p>Review the delivery details attached to this order before you continue.</p>
+    </div>
+    <div class="payment-customer-grid">
+      <div class="payment-customer-field">
         <span>Email</span>
         <strong>${escapeHtml(order.email || "-")}</strong>
       </div>
-      <div>
+      <div class="payment-customer-field">
+        <span>Name</span>
+        <strong>${escapeHtml(order.customerName || "-")}</strong>
+      </div>
+      <div class="payment-customer-field">
         <span>Phone</span>
         <strong>${escapeHtml(order.phone || "-")}</strong>
       </div>
-      <div>
-        <span>Country / Region</span>
+      <div class="payment-customer-field">
+        <span>Country</span>
         <strong>${escapeHtml(order.country || "-")}</strong>
       </div>
-      <div class="checkout-summary-row full">
+      <div class="payment-customer-field payment-customer-field-full">
         <span>Shipping Address</span>
         <strong>${escapeHtml(order.shippingAddress || "-")}</strong>
       </div>
       ${
         order.message
           ? `
-            <div class="checkout-summary-row full">
-              <span>Notes</span>
+            <div class="payment-customer-field payment-customer-field-full">
+              <span>Order Notes</span>
               <strong>${escapeHtml(order.message)}</strong>
             </div>
           `
@@ -485,12 +496,25 @@ const renderBankTransferPanel = () => {
 
   bankTransferPanel.innerHTML = `
     <div class="checkout-note-box bank-transfer-box">
-      <strong>Bank Transfer Instructions</strong>
-      <p>Send your payment to the ${escapeHtml(bankTransferAccount.providerName)} receiving account below.</p>
-      <div class="checkout-summary-facts compact">
-        <div><span>Order Number</span><strong>${escapeHtml(currentOrder.orderNumber || currentOrder.orderId || currentOrder.id || "-")}</strong></div>
-        <div><span>Amount</span><strong>${escapeHtml(currentOrder.totalAmount || currentOrder.subtotal || "$0.00")}</strong></div>
-        <div><span>Currency</span><strong>${escapeHtml(bankTransferAccount.currency)}</strong></div>
+      <div class="payment-info-box-head">
+        <strong>Bank Transfer Instructions</strong>
+        <p>Use the receiving account below to complete your transfer.</p>
+      </div>
+      <div class="payment-bank-transfer-highlights">
+        <div>
+          <span>Amount</span>
+          <strong>${escapeHtml(currentOrder.totalAmount || currentOrder.subtotal || "$0.00")}</strong>
+        </div>
+        <div>
+          <span>Currency</span>
+          <strong>${escapeHtml(bankTransferAccount.currency)}</strong>
+        </div>
+        <div>
+          <span>Order Reference</span>
+          <strong>${escapeHtml(currentOrder.orderNumber || currentOrder.orderId || currentOrder.id || "-")}</strong>
+        </div>
+      </div>
+      <div class="checkout-summary-facts compact payment-bank-transfer-details">
         <div><span>Settlement Channel</span><strong>${escapeHtml(bankTransferAccount.providerName)}</strong></div>
         ${detailRows}
       </div>
@@ -499,8 +523,10 @@ const renderBankTransferPanel = () => {
       paymentId
         ? `
           <div class="checkout-note-box bank-transfer-proof-box">
-            <strong>Submit Payment Proof</strong>
-            <p>Upload your transfer receipt and add the transaction reference so our team can confirm the payment.</p>
+            <div class="payment-info-box-head">
+              <strong>Upload Payment Proof</strong>
+              <p>Upload your transfer receipt and add the transaction reference so our team can confirm the payment.</p>
+            </div>
             <input type="hidden" name="bankTransferPaymentId" value="${escapeHtml(paymentId)}">
             <div class="form-grid bank-transfer-proof-grid">
               <label>
@@ -521,8 +547,10 @@ const renderBankTransferPanel = () => {
         `
         : `
           <div class="checkout-note-box bank-transfer-proof-box">
-            <strong>Next Step</strong>
-            <p>Confirm the bank transfer method first. After the payment record is created, this page will let you upload your proof.</p>
+            <div class="payment-info-box-head">
+              <strong>Next Step</strong>
+              <p>Confirm the bank transfer method first. After the payment record is created, this page will let you upload your proof.</p>
+            </div>
           </div>
         `
     }
@@ -534,12 +562,34 @@ const renderProductSummary = (product, order) => {
     return;
   }
 
+  const productImage = String(product.image || "").trim();
+  const productName = String(product.name || currentOrder?.productName || "Selected Product").trim();
+
   productRoot.innerHTML = `
     <div class="checkout-product-media">
-      <img src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}">
+      ${
+        productImage
+          ? `<img src="${escapeHtml(productImage)}" alt="${escapeHtml(productName)}">`
+          : `<div class="checkout-product-media-fallback">${escapeHtml(productName)}</div>`
+      }
     </div>
     <div class="checkout-product-copy">
-      <h3>${escapeHtml(product.name)}</h3>
+      <p class="checkout-mode-label">${escapeHtml(order.purchaseMode === "wholesale" ? "Wholesale order" : "Retail order")}</p>
+      <h3>${escapeHtml(productName)}</h3>
+      <div class="payment-product-meta-grid">
+        <div>
+          <span>Quantity</span>
+          <strong>${escapeHtml(order.quantity || 1)}</strong>
+        </div>
+        <div>
+          <span>Unit Price</span>
+          <strong>${escapeHtml(order.unitPrice || "$0.00")}</strong>
+        </div>
+        <div class="payment-product-meta-wide">
+          <span>Subtotal</span>
+          <strong>${escapeHtml(order.subtotal || "$0.00")}</strong>
+        </div>
+      </div>
     </div>
   `;
 };
@@ -551,20 +601,20 @@ const renderTotals = (order) => {
 
   totalsRoot.innerHTML = `
     <div class="checkout-total-row">
-      <span>Mode</span>
-      <strong>${escapeHtml(order.purchaseMode === "wholesale" ? "Wholesale" : "Retail")}</strong>
-    </div>
-    <div class="checkout-total-row">
-      <span>Unit Price</span>
-      <strong>${escapeHtml(order.unitPrice || "$0.00")}</strong>
-    </div>
-    <div class="checkout-total-row">
-      <span>Quantity</span>
-      <strong>${escapeHtml(order.quantity || 1)}</strong>
-    </div>
-    <div class="checkout-total-row">
       <span>Subtotal</span>
       <strong>${escapeHtml(order.subtotal || "$0.00")}</strong>
+    </div>
+    <div class="checkout-total-row">
+      <span>Shipping</span>
+      <strong>${escapeHtml(order.shippingAmount || "$0.00")}</strong>
+    </div>
+    <div class="checkout-total-row">
+      <span>Discount</span>
+      <strong>${escapeHtml(order.discountAmount || "$0.00")}</strong>
+    </div>
+    <div class="checkout-total-row checkout-total-row-emphasis">
+      <span>Total</span>
+      <strong>${escapeHtml(order.totalAmount || order.subtotal || "$0.00")}</strong>
     </div>
   `;
 };
@@ -851,13 +901,6 @@ const initPaymentPage = async () => {
   }
 
   currentProduct = await store.getProductById(currentOrder.productId);
-  if (!currentProduct) {
-    if (backLink) {
-      backLink.href = buildProductFallbackUrl(currentOrder, null);
-    }
-    renderEmptyState("The selected product for this order could not be loaded.");
-    return;
-  }
 
   document.title = `Payment | ${website?.brand?.name || "AvelixLink"}`;
   currentPayments = await fetchOrderPayments(currentOrder.id);
@@ -866,7 +909,14 @@ const initPaymentPage = async () => {
     backLink.href = buildCheckoutUrl(currentOrder, currentProduct);
   }
 
-  renderProductSummary(currentProduct, currentOrder);
+  renderProductSummary(
+    currentProduct || {
+      id: currentOrder.productId,
+      name: currentOrder.productName || "Selected Product",
+      image: currentOrder.items?.[0]?.productImage || "",
+    },
+    currentOrder
+  );
   renderTotals(currentOrder);
   renderBuyerDetails(currentOrder);
   renderPaymentMethods(currentOrder.purchaseMode || "retail", activeBankTransferPayment?.paymentMethod || currentOrder.paymentMethod || "", {
