@@ -776,7 +776,6 @@ const createAdminConversationRowMarkup = (thread, selectedId) => `
         <strong>${escapeHtml(thread.customerName || "Website Visitor")}</strong>
         <small>${escapeHtml(formatConversationListTime(thread.lastMessageAt || thread.updatedAt))}</small>
       </div>
-      <span class="admin-thread-email">${escapeHtml(thread.email || "No email")}</span>
       <p class="admin-thread-preview">${escapeHtml(getAdminConversationPreview(thread))}</p>
       <div class="admin-thread-bottomline">
         <span class="admin-pill ${getStatusClass(thread.status || "open")}">${escapeHtml(
@@ -1405,6 +1404,9 @@ const hydrateAdminRouteFromLocation = () => {
   if (adminState.activeSection === "orders" || adminState.activeSection === "order") {
     adminState.orders.selectedId =
       String(params.get("id") || params.get("orderId") || "").trim() || null;
+    if (adminState.activeSection === "order") {
+      adminState.activeSection = "orders";
+    }
   }
 
   if (adminState.activeSection === "payments") {
@@ -1420,7 +1422,7 @@ const syncAdminRoute = (mode = "replace") => {
     params.set("section", adminState.activeSection);
   }
 
-  if (adminState.activeSection === "order" && adminState.orders.selectedId) {
+  if (["orders", "order"].includes(adminState.activeSection) && adminState.orders.selectedId) {
     params.set("id", adminState.orders.selectedId);
   }
 
@@ -2262,12 +2264,33 @@ const openAdminOrderDetail = async (orderId, routeMode = "push") => {
     return;
   }
 
-  adminState.activeSection = "order";
+  adminState.activeSection = "orders";
   adminState.orders.selectedId = nextOrderId;
   adminState.payments.mode = "list";
   adminState.payments.selectedId = null;
   syncAdminRoute(routeMode);
   await renderCurrentSection();
+};
+
+const renderAdminDetailDrawer = ({ eyebrow = "Details", title = "Details", description = "", content = "" } = {}) => `
+  <button class="admin-detail-drawer-backdrop" type="button" data-admin-detail-drawer-close aria-label="Close details"></button>
+  <aside class="admin-detail-drawer" role="dialog" aria-modal="true" aria-label="${escapeHtml(title)}">
+    <header class="admin-detail-drawer-header">
+      <div>
+        <span>${escapeHtml(eyebrow)}</span>
+        <h2>${escapeHtml(title)}</h2>
+        ${description ? `<p>${escapeHtml(description)}</p>` : ""}
+      </div>
+      <button class="admin-detail-drawer-close" type="button" data-admin-detail-drawer-close aria-label="Close details">&times;</button>
+    </header>
+    <div class="admin-detail-drawer-body">${content}</div>
+  </aside>
+`;
+
+const bindAdminDetailDrawerClose = (onClose) => {
+  contentRoot.querySelectorAll("[data-admin-detail-drawer-close]").forEach((control) => {
+    control.addEventListener("click", onClose);
+  });
 };
 
 const updateTitle = () => {
@@ -3062,7 +3085,7 @@ const renderAdminOrderCard = (order) => {
   const itemCount = getAdminOrderItemCount(order);
   const createdDate = getAdminOrderDateGroup(order.createdAt).label;
   return `
-    <article class="admin-order-main-card">
+    <article class="admin-order-main-card admin-summary-card">
       <div class="admin-order-card-cell admin-order-card-identity">
         <span class="admin-order-mobile-label">Order #</span>
         <div class="admin-order-card-order-meta">
@@ -3138,7 +3161,7 @@ const renderOrderListMarkup = (orders) =>
     `
     : renderEmptyState("No orders yet", "Order records will appear here once customers place orders.");
 
-const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) => {
+const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState, drawerMode = false }) => {
   if (!selected) {
     return renderEmptyState("Order not found", "This order could not be loaded from the current data source.");
   }
@@ -3163,10 +3186,12 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
   const summaryCurrency = selected.currency || selectedPayments?.[0]?.currency || "USD";
 
   return `
-    <div class="admin-stack">
-      <div class="admin-page-actions">
-        <button class="admin-secondary-button" type="button" id="order-back-button">Back to Orders</button>
-      </div>
+    <div class="admin-stack ${drawerMode ? "admin-detail-drawer-content" : ""}">
+      ${
+        drawerMode
+          ? ""
+          : '<div class="admin-page-actions"><button class="admin-secondary-button" type="button" id="order-back-button">Back to Orders</button></div>'
+      }
 
       <form class="admin-form-stack" id="order-detail-form">
         <input type="hidden" name="id" value="${escapeHtml(selected.id)}">
@@ -3462,6 +3487,7 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
 const bindOrderDetailInteractions = (selected) => {
   document.querySelector("#order-back-button")?.addEventListener("click", async () => {
     adminState.activeSection = "orders";
+    adminState.orders.selectedId = null;
     syncAdminRoute("push");
     await renderCurrentSection();
   });
@@ -3550,6 +3576,82 @@ const bindOrderDetailInteractions = (selected) => {
     await renderCurrentSection();
   });
 
+};
+
+const getAdminOrderDetailData = async (orderId) => {
+  const [selected, selectedPayments] = await Promise.all([
+    fetchAdminOrder(orderId),
+    fetchAdminOrderPayments(orderId),
+  ]);
+
+  if (!selected) {
+    return { selected: null, selectedPayments: [], timelineState: null };
+  }
+
+  if (adminState.orders.timeline.orderId !== orderId) {
+    void loadAdminOrderTimeline(orderId);
+  }
+
+  const timelineState =
+    adminState.orders.timeline.orderId === orderId
+      ? adminState.orders.timeline
+      : {
+          orderId,
+          loading: true,
+          error: "",
+          items: [],
+          requestId: 0,
+        };
+
+  return { selected, selectedPayments, timelineState };
+};
+
+const renderOrderDetailDrawer = async () => {
+  const orderId = String(adminState.orders.selectedId || "").trim();
+  if (!orderId) {
+    return;
+  }
+
+  contentRoot.insertAdjacentHTML(
+    "beforeend",
+    renderAdminDetailDrawer({
+      eyebrow: "Order Details",
+      title: "Loading order...",
+      content: '<div class="admin-drawer-loading">Loading order details...</div>',
+    })
+  );
+
+  const closeDrawer = async () => {
+    adminState.orders.selectedId = null;
+    syncAdminRoute("replace");
+    await renderCurrentSection();
+  };
+  bindAdminDetailDrawerClose(closeDrawer);
+
+  const { selected, selectedPayments, timelineState } = await getAdminOrderDetailData(orderId);
+  const drawer = contentRoot.querySelector(".admin-detail-drawer");
+  if (!drawer || adminState.orders.selectedId !== orderId) {
+    return;
+  }
+
+  if (!selected) {
+    drawer.querySelector(".admin-detail-drawer-body").innerHTML = renderEmptyState(
+      "Order not found",
+      "This order could not be loaded."
+    );
+    drawer.querySelector(".admin-detail-drawer-header h2").textContent = "Order unavailable";
+    return;
+  }
+
+  drawer.querySelector(".admin-detail-drawer-header h2").textContent =
+    selected.orderNumber || selected.orderId || "Order Details";
+  drawer.querySelector(".admin-detail-drawer-body").innerHTML = renderOrderDetailMarkup({
+    selected,
+    selectedPayments,
+    timelineState,
+    drawerMode: true,
+  });
+  bindOrderDetailInteractions(selected);
 };
 
 const renderOrdersSection = async () => {
@@ -3685,6 +3787,8 @@ const renderOrdersSection = async () => {
       await openAdminOrderDetail(button.dataset.orderId || null);
     });
   });
+
+  await renderOrderDetailDrawer();
 };
 
 const renderOrderDetailSection = async () => {
@@ -3786,47 +3890,12 @@ const groupAdminPaymentsByDate = (payments) => {
   return Array.from(groups.values());
 };
 
-const getAdminPaymentStageState = (payment) => {
-  const status = normalizeStatusValue(payment.status);
-  const settledStatuses = new Set(["paid", "confirmed", "deposit_paid", "partially_paid", "refunded", "partially_refunded"]);
-  const settlementComplete = settledStatuses.has(status);
-  const verificationComplete = settlementComplete;
-  const verificationActive =
-    !verificationComplete &&
-    (status === "payment_submitted" ||
-      (isBankTransferPaymentRecord(payment) && status === "pending") ||
-      status === "failed");
-
-  return { verificationActive, verificationComplete, settlementComplete };
-};
-
-const renderAdminPaymentStageLine = (payment) => {
-  const stage = getAdminPaymentStageState(payment);
-  const verificationClass = stage.verificationComplete
-    ? "is-complete"
-    : stage.verificationActive
-      ? "is-active"
-      : "is-pending";
-  const settlementClass = stage.settlementComplete ? "is-complete" : "is-pending";
-
-  return `
-    <div class="admin-payment-stage-line" aria-label="Payment progress: Created, Verification, Settlement">
-      <span class="admin-payment-stage is-complete"><i aria-hidden="true"></i><small>Created</small></span>
-      <span class="admin-payment-stage ${verificationClass}"><i aria-hidden="true"></i><small>Verification</small></span>
-      <span class="admin-payment-stage ${settlementClass}"><i aria-hidden="true"></i><small>Settlement</small></span>
-    </div>
-  `;
-};
-
 const renderAdminPaymentCard = (payment) => {
-  const transactionReference =
-    payment.transactionId || payment.paypalCaptureId || payment.providerReference || payment.paypalOrderId || "-";
   return `
-    <article class="admin-payment-main-card">
+    <article class="admin-payment-main-card admin-summary-card">
       <div class="admin-payment-card-cell admin-payment-card-identity">
         <span class="admin-payment-mobile-label">Payment ID</span>
         <strong class="admin-mono">${escapeHtml(payment.paymentId || payment.id || "-")}</strong>
-        ${renderAdminPaymentStageLine(payment)}
       </div>
       <div class="admin-payment-card-cell">
         <span class="admin-payment-mobile-label">Order #</span>
@@ -3837,14 +3906,6 @@ const renderAdminPaymentCard = (payment) => {
         <strong>${escapeHtml(payment.customerDisplay || payment.customer || "Unknown Customer")}</strong>
         ${payment.linkedOrder?.purchaseMode ? `<small>${escapeHtml(formatStatusLabel(payment.linkedOrder.purchaseMode))}</small>` : ""}
       </div>
-      <div class="admin-payment-card-cell">
-        <span class="admin-payment-mobile-label">Payment Type</span>
-        <strong>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</strong>
-      </div>
-      <div class="admin-payment-card-cell">
-        <span class="admin-payment-mobile-label">Method</span>
-        <strong>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</strong>
-      </div>
       <div class="admin-payment-card-cell admin-payment-card-amount">
         <span class="admin-payment-mobile-label">Amount</span>
         <strong>${escapeHtml(formatMoney(payment.amount, payment.currency))}</strong>
@@ -3854,13 +3915,16 @@ const renderAdminPaymentCard = (payment) => {
         <strong>${escapeHtml(String(payment.currency || "USD").toUpperCase())}</strong>
       </div>
       <div class="admin-payment-card-cell">
+        <span class="admin-payment-mobile-label">Method</span>
+        <strong>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</strong>
+      </div>
+      <div class="admin-payment-card-cell">
         <span class="admin-payment-mobile-label">Status</span>
         <span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span>
-        ${payment.paidAt ? `<small>Paid ${escapeHtml(formatDate(payment.paidAt))}</small>` : ""}
       </div>
-      <div class="admin-payment-card-cell admin-payment-card-reference">
-        <span class="admin-payment-mobile-label">Transaction Reference</span>
-        <strong class="admin-mono">${escapeHtml(transactionReference)}</strong>
+      <div class="admin-payment-card-cell">
+        <span class="admin-payment-mobile-label">Created</span>
+        <strong>${escapeHtml(formatShortDate(payment.createdAt))}</strong>
       </div>
       <div class="admin-payment-card-cell admin-payment-card-action">
         <span class="admin-payment-mobile-label">Action</span>
@@ -3888,12 +3952,11 @@ const renderPaymentListMarkup = (payments) =>
                     <span>Payment ID</span>
                     <span>Order #</span>
                     <span>Customer</span>
-                    <span>Payment Type</span>
-                    <span>Method</span>
                     <span>Amount</span>
                     <span>Currency</span>
+                    <span>Method</span>
                     <span>Status</span>
-                    <span>Transaction Reference</span>
+                    <span>Created</span>
                     <span>Action</span>
                   </div>
                   ${group.payments.map(renderAdminPaymentCard).join("")}
@@ -3969,7 +4032,7 @@ const renderPaymentTimelineMarkup = (payment) => {
   `;
 };
 
-const renderPaymentDetailMarkup = ({ payment, order }) => {
+const renderPaymentDetailMarkup = ({ payment, order, drawerMode = false }) => {
   if (!payment) {
     return renderEmptyState("Payment not found", "This payment record could not be loaded.");
   }
@@ -4004,10 +4067,12 @@ const renderPaymentDetailMarkup = ({ payment, order }) => {
         `;
 
   return `
-    <div class="admin-payment-detail-stack admin-finance-detail">
-      <div class="admin-page-actions">
-        <button class="admin-secondary-button" type="button" id="payments-back-button">Back to Payments</button>
-      </div>
+    <div class="admin-payment-detail-stack admin-finance-detail ${drawerMode ? "admin-detail-drawer-content" : ""}">
+      ${
+        drawerMode
+          ? ""
+          : '<div class="admin-page-actions"><button class="admin-secondary-button" type="button" id="payments-back-button">Back to Payments</button></div>'
+      }
 
       <section class="admin-payment-header-card">
         <div class="admin-payment-header-copy">
@@ -4086,20 +4151,7 @@ const renderPaymentDetailMarkup = ({ payment, order }) => {
   `;
 };
 
-const renderPaymentDetailSection = async () => {
-  const paymentId = String(adminState.payments.selectedId || "").trim();
-  const payment = paymentId ? await fetchAdminPayment(paymentId) : null;
-  if (!payment) {
-    adminState.payments.mode = "list";
-    adminState.payments.selectedId = null;
-    syncAdminRoute("replace");
-    await renderCurrentSection();
-    return;
-  }
-
-  const order = payment.orderId ? await fetchAdminOrder(payment.orderId) : null;
-  contentRoot.innerHTML = renderPaymentDetailMarkup({ payment, order });
-
+const bindPaymentDetailInteractions = (payment, order) => {
   document.querySelector("#payments-back-button")?.addEventListener("click", async () => {
     adminState.payments.mode = "list";
     adminState.payments.selectedId = null;
@@ -4115,11 +4167,11 @@ const renderPaymentDetailSection = async () => {
   });
   document.querySelector("#payment-confirm-bank-transfer-button")?.addEventListener("click", async () => {
     await reviewAdminBankTransferPayment(payment.id, "paid");
-    await renderPaymentDetailSection();
+    await renderCurrentSection();
   });
   document.querySelector("#payment-reject-bank-transfer-button")?.addEventListener("click", async () => {
     await reviewAdminBankTransferPayment(payment.id, "failed");
-    await renderPaymentDetailSection();
+    await renderCurrentSection();
   });
   document.querySelector("#payment-detail-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -4128,16 +4180,75 @@ const renderPaymentDetailSection = async () => {
       status,
       paidAt: status === "paid" ? new Date().toISOString() : "",
     });
-    await renderPaymentDetailSection();
+    await renderCurrentSection();
   });
 };
 
-const renderPaymentsSection = async () => {
-  if (adminState.payments.mode === "detail" && adminState.payments.selectedId) {
-    await renderPaymentDetailSection();
+const renderPaymentDetailDrawer = async () => {
+  const paymentId = String(adminState.payments.selectedId || "").trim();
+  if (!paymentId || adminState.payments.mode !== "detail") {
     return;
   }
 
+  contentRoot.insertAdjacentHTML(
+    "beforeend",
+    renderAdminDetailDrawer({
+      eyebrow: "Payment Details",
+      title: "Loading payment...",
+      content: '<div class="admin-drawer-loading">Loading payment details...</div>',
+    })
+  );
+
+  const closeDrawer = async () => {
+    adminState.payments.mode = "list";
+    adminState.payments.selectedId = null;
+    syncAdminRoute("replace");
+    await renderCurrentSection();
+  };
+  bindAdminDetailDrawerClose(closeDrawer);
+
+  const payment = await fetchAdminPayment(paymentId);
+  const order = payment?.orderId ? await fetchAdminOrder(payment.orderId) : null;
+  const drawer = contentRoot.querySelector(".admin-detail-drawer");
+  if (!drawer || adminState.payments.selectedId !== paymentId) {
+    return;
+  }
+
+  if (!payment) {
+    drawer.querySelector(".admin-detail-drawer-header h2").textContent = "Payment unavailable";
+    drawer.querySelector(".admin-detail-drawer-body").innerHTML = renderEmptyState(
+      "Payment not found",
+      "This payment record could not be loaded."
+    );
+    return;
+  }
+
+  drawer.querySelector(".admin-detail-drawer-header h2").textContent = payment.paymentId || payment.id;
+  drawer.querySelector(".admin-detail-drawer-body").innerHTML = renderPaymentDetailMarkup({
+    payment,
+    order,
+    drawerMode: true,
+  });
+  bindPaymentDetailInteractions(payment, order);
+};
+
+const renderPaymentDetailSection = async () => {
+  const paymentId = String(adminState.payments.selectedId || "").trim();
+  const payment = paymentId ? await fetchAdminPayment(paymentId) : null;
+  if (!payment) {
+    adminState.payments.mode = "list";
+    adminState.payments.selectedId = null;
+    syncAdminRoute("replace");
+    await renderCurrentSection();
+    return;
+  }
+
+  const order = payment.orderId ? await fetchAdminOrder(payment.orderId) : null;
+  contentRoot.innerHTML = renderPaymentDetailMarkup({ payment, order });
+  bindPaymentDetailInteractions(payment, order);
+};
+
+const renderPaymentsSection = async () => {
   const [payments, orders] = await Promise.all([fetchAdminPayments(), fetchAdminOrders()]);
   const orderMap = new Map(orders.map((order) => [String(order.id || ""), order]));
   const statusMatcher = adminState.payments.status === "all"
@@ -4298,6 +4409,7 @@ const renderPaymentsSection = async () => {
     await renderCurrentSection();
   });
 
+  await renderPaymentDetailDrawer();
 };
 
 const getAdminCustomerKey = (record, fallbackIndex = 0) => {
@@ -4404,13 +4516,17 @@ const buildAdminCustomerRecords = (orders, conversations) => {
     .sort((left, right) => new Date(right.lastActivity || 0).getTime() - new Date(left.lastActivity || 0).getTime());
 };
 
-const renderAdminCustomerDetail = (customer) => {
+const renderAdminCustomerDetail = (customer, { drawerMode = false } = {}) => {
   const recentOrders = customer.orders.slice(0, 5);
   const lastOrder = customer.orders[0] || null;
   const lastConversation = customer.conversations[0] || null;
   return `
-    <div class="admin-stack admin-customer-record-detail">
-      <div class="admin-page-actions"><button class="admin-secondary-button" type="button" id="customer-list-back">Back to Customers</button></div>
+    <div class="admin-stack admin-customer-record-detail ${drawerMode ? "admin-detail-drawer-content" : ""}">
+      ${
+        drawerMode
+          ? ""
+          : '<div class="admin-page-actions"><button class="admin-secondary-button" type="button" id="customer-list-back">Back to Customers</button></div>'
+      }
       <section class="admin-customer-record-header">
         <span class="admin-customer-avatar">${escapeHtml((customer.customerName || customer.email || "C").slice(0, 1).toUpperCase())}</span>
         <div><p class="admin-order-overline">Customer</p><h3>${escapeHtml(customer.customerName || "Customer")}</h3><p>${escapeHtml(customer.email || "No email")}</p></div>
@@ -4445,26 +4561,6 @@ const renderCustomerListSection = async () => {
   const [orders, conversations] = await Promise.all([fetchAdminOrders(), fetchAdminSupportConversations()]);
   const customers = buildAdminCustomerRecords(orders, conversations);
   const selected = customers.find((customer) => customer.key === adminState.customerList.selectedKey) || null;
-  if (adminState.customerList.mode === "detail" && selected) {
-    contentRoot.innerHTML = renderAdminCustomerDetail(selected);
-    document.querySelector("#customer-list-back")?.addEventListener("click", async () => {
-      adminState.customerList.mode = "list";
-      await renderCurrentSection();
-    });
-    document.querySelector("#customer-open-support")?.addEventListener("click", async () => {
-      adminState.activeSection = "support";
-      adminState.customers.selectedId = selected.conversations[0]?.id || null;
-      adminState.customers.detailsOpen = false;
-      syncAdminRoute("push");
-      await renderCurrentSection();
-    });
-    contentRoot.querySelectorAll("[data-customer-record-order]").forEach((button) => button.addEventListener("click", async () => {
-      await openAdminOrderDetail(button.dataset.customerRecordOrder || null);
-    }));
-    return;
-  }
-
-  adminState.customerList.mode = "list";
   const query = adminState.customerList.query.trim().toLowerCase();
   const countries = Array.from(new Set(customers.map((customer) => customer.country).filter(Boolean))).sort();
   const statuses = Array.from(new Set(customers.map((customer) => customer.customerStatus).filter(Boolean))).sort();
@@ -4489,7 +4585,7 @@ const renderCustomerListSection = async () => {
           </div>
         </div>
       </section>
-      <section class="admin-panel"><div class="admin-panel-header"><div><h4>Customer Records</h4><p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p></div></div>${filtered.length ? `<div class="admin-table-shell admin-commerce-table-shell"><table class="admin-table admin-commerce-table admin-customer-records-table"><thead><tr><th>Customer</th><th>Company</th><th>Country</th><th>Type</th><th>Orders</th><th>Total Spend</th><th>Last Activity</th><th>Status</th><th>Action</th></tr></thead><tbody>${filtered.map((customer) => `<tr><td><strong>${escapeHtml(customer.customerName || "Customer")}</strong><small>${escapeHtml(customer.email || "No email")}</small></td><td>${escapeHtml(customer.company || "-")}</td><td>${escapeHtml(customer.country || "-")}</td><td>${escapeHtml(formatStatusLabel(customer.customerType))}</td><td>${formatNumber(customer.orders.length)}</td><td class="admin-table-strong">${escapeHtml(customer.totalSpend)}</td><td>${escapeHtml(formatShortDate(customer.lastActivity))}</td><td><span class="admin-pill ${getAdminPillStatusClass(customer.customerStatus)}">${escapeHtml(formatStatusLabel(customer.customerStatus))}</span></td><td><button class="admin-secondary-button admin-table-action" type="button" data-customer-record="${escapeHtml(customer.key)}">View</button></td></tr>`).join("")}</tbody></table></div>` : renderEmptyState("No customers found", "Adjust the filters to view customer records.")}</section>
+      <section class="admin-panel"><div class="admin-panel-header"><div><h4>Customer Records</h4><p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p></div></div>${filtered.length ? `<div class="admin-customer-summary-list"><div class="admin-customer-summary-labels" aria-hidden="true"><span>Customer</span><span>Country</span><span>Orders</span><span>Total Spend</span><span>Last Activity</span><span>Action</span></div>${filtered.map((customer) => `<article class="admin-customer-summary-card admin-summary-card"><div><span class="admin-summary-mobile-label">Customer</span><strong>${escapeHtml(customer.customerName || "Customer")}</strong></div><div><span class="admin-summary-mobile-label">Country</span><strong>${escapeHtml(customer.country || "-")}</strong></div><div><span class="admin-summary-mobile-label">Orders</span><strong>${formatNumber(customer.orders.length)}</strong></div><div><span class="admin-summary-mobile-label">Total Spend</span><strong>${escapeHtml(customer.totalSpend)}</strong></div><div><span class="admin-summary-mobile-label">Last Activity</span><strong>${escapeHtml(formatShortDate(customer.lastActivity))}</strong></div><div class="admin-summary-card-action"><span class="admin-summary-mobile-label">Action</span><button class="admin-secondary-button admin-table-action" type="button" data-customer-record="${escapeHtml(customer.key)}">View</button></div></article>`).join("")}</div>` : renderEmptyState("No customers found", "Adjust the filters to view customer records.")}</section>
     </div>
   `;
 
@@ -4508,6 +4604,33 @@ const renderCustomerListSection = async () => {
     adminState.customerList.mode = "detail";
     await renderCurrentSection();
   }));
+
+  if (adminState.customerList.mode === "detail" && selected) {
+    contentRoot.insertAdjacentHTML(
+      "beforeend",
+      renderAdminDetailDrawer({
+        eyebrow: "Customer Details",
+        title: selected.customerName || "Customer",
+        description: selected.email || "Customer profile and activity",
+        content: renderAdminCustomerDetail(selected, { drawerMode: true }),
+      })
+    );
+    bindAdminDetailDrawerClose(async () => {
+      adminState.customerList.mode = "list";
+      adminState.customerList.selectedKey = null;
+      await renderCurrentSection();
+    });
+    document.querySelector("#customer-open-support")?.addEventListener("click", async () => {
+      adminState.activeSection = "support";
+      adminState.customers.selectedId = selected.conversations[0]?.id || null;
+      adminState.customers.detailsOpen = false;
+      syncAdminRoute("push");
+      await renderCurrentSection();
+    });
+    contentRoot.querySelectorAll("[data-customer-record-order]").forEach((button) => button.addEventListener("click", async () => {
+      await openAdminOrderDetail(button.dataset.customerRecordOrder || null);
+    }));
+  }
 };
 
 const getCustomerOrderHistory = (conversation, orders) => {
@@ -6986,13 +7109,12 @@ const renderWebsiteSection = async () => {
   contentRoot.innerHTML = `
     <form class="admin-form-stack" id="website-form">
       <div class="admin-section-grid">
-        <section class="admin-panel">
-          <div class="admin-panel-header">
-            <div>
-              <h3>Brand</h3>
-              <p>Logo, website name, brand identity, and favicon.</p>
-            </div>
-          </div>
+        <details class="admin-panel admin-settings-accordion">
+          <summary>
+            <span><strong>Brand</strong><small>Logo, website name, brand identity, and favicon.</small></span>
+            <span class="admin-settings-accordion-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="admin-settings-accordion-body">
           <div class="admin-form-grid">
             <label>
               Website Name
@@ -7057,15 +7179,15 @@ const renderWebsiteSection = async () => {
               </div>
             </div>
           </div>
-        </section>
-
-        <section class="admin-panel">
-          <div class="admin-panel-header">
-            <div>
-              <h3>Homepage Hero</h3>
-              <p>Text, banner, and background used on the homepage.</p>
-            </div>
           </div>
+        </details>
+
+        <details class="admin-panel admin-settings-accordion">
+          <summary>
+            <span><strong>Homepage Hero</strong><small>Text, banner, and background used on the homepage.</small></span>
+            <span class="admin-settings-accordion-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="admin-settings-accordion-body">
           <div class="admin-form-grid">
             <label>
               Hero Eyebrow
@@ -7107,15 +7229,15 @@ const renderWebsiteSection = async () => {
               </div>
             </div>
           </div>
-        </section>
-
-        <section class="admin-panel">
-          <div class="admin-panel-header">
-            <div>
-              <h3>Footer and Contact</h3>
-              <p>Contact info and footer copy only. No product fields here.</p>
-            </div>
           </div>
+        </details>
+
+        <details class="admin-panel admin-settings-accordion">
+          <summary>
+            <span><strong>Footer and Contact</strong><small>Contact info and footer copy only. No product fields here.</small></span>
+            <span class="admin-settings-accordion-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="admin-settings-accordion-body">
           <div class="admin-form-grid">
             <label class="full">
               Footer Tagline
@@ -7138,15 +7260,15 @@ const renderWebsiteSection = async () => {
               <textarea name="contactAddress" rows="4">${escapeHtml(website.contact.address || "")}</textarea>
             </label>
           </div>
-        </section>
-
-        <section class="admin-panel">
-          <div class="admin-panel-header">
-            <div>
-              <h3>Social Links</h3>
-              <p>Public-facing social and messaging links.</p>
-            </div>
           </div>
+        </details>
+
+        <details class="admin-panel admin-settings-accordion">
+          <summary>
+            <span><strong>Social Links</strong><small>Public-facing social and messaging links.</small></span>
+            <span class="admin-settings-accordion-chevron" aria-hidden="true"></span>
+          </summary>
+          <div class="admin-settings-accordion-body">
           <div class="admin-form-grid">
             <label>
               LinkedIn
@@ -7165,7 +7287,8 @@ const renderWebsiteSection = async () => {
               <input type="url" name="x" value="${escapeHtml(website.social.x || "")}">
             </label>
           </div>
-        </section>
+          </div>
+        </details>
       </div>
 
       <div class="admin-actions-inline">
@@ -7337,8 +7460,9 @@ const renderSeoSection = async () => {
       </div>
 
       <div class="admin-seo-grid">
-        <section class="admin-panel admin-seo-card">
-          <div class="admin-panel-header"><div><h3>Search Appearance</h3><p>Default homepage search result content.</p></div></div>
+        <details class="admin-panel admin-seo-card admin-settings-accordion">
+          <summary><span><strong>Search Appearance</strong><small>Default homepage search result content.</small></span><span class="admin-settings-accordion-chevron" aria-hidden="true"></span></summary>
+          <div class="admin-settings-accordion-body">
           <div class="admin-form-grid">
             <label class="full">Site Title<input type="text" name="siteTitle" value="${escapeHtml(website.brand.browserTitle || "")}" required></label>
             <label class="full">Meta Description<textarea name="metaDescription" rows="4" required>${escapeHtml(seo.metaDescription || "")}</textarea></label>
@@ -7347,25 +7471,31 @@ const renderSeoSection = async () => {
               <label>Meta Keywords<textarea name="metaKeywords" rows="3">${escapeHtml(seo.metaKeywords || "")}</textarea></label>
             </details>
           </div>
-        </section>
+          </div>
+        </details>
 
-        <section class="admin-panel admin-seo-card">
-          <div class="admin-panel-header"><div><h3>Search Visibility</h3><p>Control whether public pages may be indexed.</p></div><span class="admin-pill ${indexingEnabled ? "status-paid" : "status-cancelled"}" id="seo-indexing-status">Indexing: ${indexingEnabled ? "Enabled" : "Disabled"}</span></div>
+        <details class="admin-panel admin-seo-card admin-settings-accordion">
+          <summary><span><strong>Search Visibility</strong><small>Control whether public pages may be indexed.</small></span><span class="admin-pill ${indexingEnabled ? "status-paid" : "status-cancelled"}" id="seo-indexing-status">Indexing: ${indexingEnabled ? "Enabled" : "Disabled"}</span><span class="admin-settings-accordion-chevron" aria-hidden="true"></span></summary>
+          <div class="admin-settings-accordion-body">
           <label class="admin-payment-toggle-row admin-seo-toggle">
             <span><strong>Allow Search Engine Indexing</strong><small>When disabled, public pages output noindex and robots.txt blocks crawling.</small></span>
             <input type="checkbox" name="allowIndexing" ${indexingEnabled ? "checked" : ""}>
           </label>
-        </section>
+          </div>
+        </details>
 
-        <section class="admin-panel admin-seo-card">
-          <div class="admin-panel-header"><div><h3>Canonical</h3><p>Canonical URLs are generated automatically for public pages and products.</p></div></div>
+        <details class="admin-panel admin-seo-card admin-settings-accordion">
+          <summary><span><strong>Canonical</strong><small>Canonical URLs are generated automatically for public pages and products.</small></span><span class="admin-settings-accordion-chevron" aria-hidden="true"></span></summary>
+          <div class="admin-settings-accordion-body">
           <div class="admin-form-grid">
             <label class="full">Canonical Base URL<input type="url" name="canonicalBaseUrl" value="${escapeHtml(canonicalBaseUrl)}" placeholder="https://avelixlink.com" required></label>
           </div>
-        </section>
+          </div>
+        </details>
 
-        <section class="admin-panel admin-seo-card admin-seo-social-card">
-          <div class="admin-panel-header"><div><h3>Social Sharing</h3><p>Default Open Graph content used when a page has no product-specific value.</p></div></div>
+        <details class="admin-panel admin-seo-card admin-seo-social-card admin-settings-accordion">
+          <summary><span><strong>Social Sharing</strong><small>Default Open Graph content used when a page has no product-specific value.</small></span><span class="admin-settings-accordion-chevron" aria-hidden="true"></span></summary>
+          <div class="admin-settings-accordion-body">
           <div class="admin-form-grid">
             <label class="full">OG Title<input type="text" name="ogTitle" value="${escapeHtml(seo.ogTitle || website.brand.browserTitle || "")}" required></label>
             <label class="full">OG Description<textarea name="ogDescription" rows="4" required>${escapeHtml(seo.ogDescription || seo.metaDescription || "")}</textarea></label>
@@ -7375,12 +7505,15 @@ const renderSeoSection = async () => {
             ${seo.ogImage || website.brand.logoImage ? `<img id="seo-og-preview-image" src="${escapeHtml(seo.ogImage || website.brand.logoImage)}" alt="Open Graph preview">` : '<div id="seo-og-preview-image" class="admin-image-preview placeholder">No OG image configured</div>'}
             <div><span>Social preview</span><strong id="seo-og-preview-title">${escapeHtml(seo.ogTitle || website.brand.browserTitle || "AvelixLink")}</strong><p id="seo-og-preview-description">${escapeHtml(seo.ogDescription || seo.metaDescription || "")}</p></div>
           </div>
-        </section>
+          </div>
+        </details>
 
-        <section class="admin-panel admin-seo-card admin-seo-sitemap-card">
-          <div class="admin-panel-header"><div><h3>Sitemap</h3><p>Generated automatically from public routes and published products.</p></div><span class="admin-pill status-paid">Active</span></div>
+        <details class="admin-panel admin-seo-card admin-seo-sitemap-card admin-settings-accordion">
+          <summary><span><strong>Sitemap</strong><small>Generated automatically from public routes and published products.</small></span><span class="admin-pill status-paid">Active</span><span class="admin-settings-accordion-chevron" aria-hidden="true"></span></summary>
+          <div class="admin-settings-accordion-body">
           <div class="admin-seo-sitemap-row"><code>/sitemap.xml</code><a class="admin-secondary-button" href="/sitemap.xml" target="_blank" rel="noopener">Open Sitemap</a></div>
-        </section>
+          </div>
+        </details>
       </div>
 
       <div class="admin-actions-inline"><button class="admin-primary-button" type="submit">Save SEO</button></div>
@@ -7512,13 +7645,12 @@ const renderSettingsSectionV4 = async () => {
   const renderAccountSettings = () => `
     ${renderHeader()}
     <form class="admin-settings-shell" id="settings-form">
-      <section class="admin-panel admin-settings-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Administrator Access</h3>
-            <p>Update the credentials used to sign in to the admin dashboard.</p>
-          </div>
-        </div>
+      <details class="admin-panel admin-settings-panel admin-settings-accordion">
+        <summary>
+          <span><strong>Administrator Access</strong><small>Update the credentials used to sign in to the admin dashboard.</small></span>
+          <span class="admin-settings-accordion-chevron" aria-hidden="true"></span>
+        </summary>
+        <div class="admin-settings-accordion-body">
         <div class="admin-form-grid">
           <label>
             Admin Email
@@ -7533,7 +7665,8 @@ const renderSettingsSectionV4 = async () => {
             <input type="email" name="recoveryEmail" value="${escapeHtml(settings.recoveryEmail || "")}">
           </label>
         </div>
-      </section>
+        </div>
+      </details>
       <div class="admin-actions-inline">
         <button class="admin-primary-button" type="submit">${escapeHtml(meta.submitLabel)}</button>
       </div>
