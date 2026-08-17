@@ -730,52 +730,44 @@ textarea {
 }
 
 .admin-payment-settings-page {
-  gap: 20px;
+  gap: 16px;
 }
 
-.admin-payment-settings-group {
+.admin-payment-methods {
   display: grid;
   gap: 12px;
 }
 
-.admin-payment-settings-group-head {
+.admin-payment-methods-head {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding-inline: 2px;
 }
 
-.admin-payment-settings-group-head h3,
-.admin-payment-settings-group-head p,
+.admin-payment-methods-head h3,
+.admin-payment-methods-head p,
 .admin-payment-config-heading h4,
 .admin-payment-config-heading p,
-.admin-future-payment-card p {
+.admin-payment-subsection-head h4,
+.admin-payment-subsection-head p {
   margin: 0;
 }
 
-.admin-payment-settings-group-head h3 {
+.admin-payment-methods-head h3 {
   font-size: 1rem;
 }
 
-.admin-payment-settings-group-head p {
+.admin-payment-methods-head p {
   margin-top: 4px;
   color: var(--text-soft);
-  font-size: 0.82rem;
+  font-size: 0.875rem;
 }
 
-.admin-payment-accordion-list {
+.admin-payment-method-list {
   display: grid;
-  gap: 10px;
-}
-
-.admin-payment-section-accordion > .admin-payment-section-accordion-body {
-  padding: 12px;
-  background: var(--surface-soft);
-}
-
-.admin-payment-section-accordion .admin-payment-accordion {
-  background: var(--surface);
+  gap: 12px;
 }
 
 .admin-payment-accordion {
@@ -790,8 +782,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 82px;
-  padding: 16px 18px;
+  min-height: 76px;
+  padding: 14px 18px;
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -835,12 +827,12 @@ textarea {
 
 .admin-payment-accordion-copy strong {
   color: var(--text);
-  font-size: 0.95rem;
+  font-size: 1rem;
 }
 
 .admin-payment-accordion-copy small {
   color: var(--text-soft);
-  font-size: 0.78rem;
+  font-size: 0.875rem;
 }
 
 .admin-payment-accordion-toggle {
@@ -870,9 +862,24 @@ textarea {
 
 .admin-payment-accordion-body {
   display: grid;
-  gap: 18px;
-  padding: 20px;
+  gap: 16px;
+  padding: 18px;
   border-top: 1px solid var(--line);
+}
+
+.admin-payment-accordion[open] > .admin-payment-accordion-body {
+  animation: admin-payment-card-reveal 0.2s ease-out;
+}
+
+@keyframes admin-payment-card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .admin-payment-config-heading {
@@ -881,12 +888,12 @@ textarea {
 }
 
 .admin-payment-config-heading h4 {
-  font-size: 0.92rem;
+  font-size: 1rem;
 }
 
 .admin-payment-config-heading p {
   color: var(--text-soft);
-  font-size: 0.8rem;
+  font-size: 0.875rem;
 }
 
 .admin-payment-config-grid {
@@ -908,7 +915,7 @@ textarea {
 
 .admin-payment-config-item > span {
   color: var(--text-faint);
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   font-weight: 750;
   text-transform: uppercase;
 }
@@ -916,7 +923,7 @@ textarea {
 .admin-payment-config-item > strong {
   overflow: hidden;
   color: var(--text);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -964,40 +971,35 @@ textarea {
   border-bottom: 1px solid var(--line);
 }
 
-.admin-future-payment-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.admin-payment-subsection-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
   gap: 12px;
+  padding-top: 4px;
 }
 
-.admin-future-payment-card {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface-muted);
-}
-
-.admin-future-payment-card > div {
+.admin-payment-subsection-head > div {
   display: grid;
   gap: 4px;
-  min-width: 0;
 }
 
-.admin-future-payment-card strong {
-  font-size: 0.88rem;
+.admin-payment-subsection-head h4 {
+  font-size: 1rem;
 }
 
-.admin-future-payment-card p {
-  overflow: hidden;
+.admin-payment-subsection-head p {
   color: var(--text-soft);
-  font-size: 0.76rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.admin-payment-method-card.is-future > summary {
+  background: color-mix(in srgb, var(--surface-muted) 60%, var(--surface));
+}
+
+.admin-payment-method-card.is-future .admin-payment-accordion-icon {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-soft);
 }
 
 .admin-payment-settings-actions {
@@ -1015,8 +1017,7 @@ textarea {
 
 @media (max-width: 1000px) {
   .admin-settlement-account-grid,
-  .admin-payment-config-grid,
-  .admin-future-payment-list {
+  .admin-payment-config-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -1049,14 +1050,6 @@ textarea {
     padding: 16px 14px;
   }
 
-  .admin-future-payment-card {
-    grid-template-columns: 42px minmax(0, 1fr);
-  }
-
-  .admin-future-payment-card .admin-method-status-badge {
-    grid-column: 2;
-    justify-self: start;
-  }
 }
 
 .admin-method-status-badge {
@@ -7120,5 +7113,331 @@ textarea {
 
   .admin-settings-accordion-body {
     padding: 14px;
+  }
+}
+
+/* Shared management-page architecture: compact overview, filters, then an internal record scroller. */
+.admin-management-page-head {
+  min-height: 48px;
+  margin: 0;
+}
+
+.admin-management-page-head h2 {
+  font-size: 1.125rem;
+}
+
+.admin-management-page-head p {
+  margin-top: 3px;
+  font-size: 0.875rem;
+}
+
+.admin-commerce-section,
+.admin-customer-records,
+.admin-products-management {
+  gap: 12px;
+}
+
+.admin-management-summary,
+.admin-commerce-summary.admin-management-summary {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  min-height: 58px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.035);
+  scrollbar-width: thin;
+}
+
+.admin-management-summary-item,
+.admin-management-summary .admin-commerce-summary-card {
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  min-width: 150px;
+  min-height: 44px;
+  padding: 4px 16px;
+  overflow: visible;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.admin-management-summary-item:last-child,
+.admin-management-summary .admin-commerce-summary-card:last-child {
+  border-right: 0;
+}
+
+.admin-management-summary .admin-commerce-summary-card::before {
+  display: none;
+}
+
+.admin-management-summary-item > span,
+.admin-management-summary .admin-commerce-summary-card > span {
+  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.25;
+  text-transform: none;
+}
+
+.admin-management-summary-item > strong,
+.admin-management-summary .admin-commerce-summary-card > strong {
+  align-self: auto;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-commerce-filter-panel,
+.admin-customer-records-toolbar {
+  padding: 14px 16px;
+}
+
+.admin-record-panel {
+  min-height: 0;
+  padding: 14px 16px 16px;
+}
+
+.admin-record-panel > .admin-panel-header {
+  margin-bottom: 10px;
+}
+
+.admin-record-list-scroll {
+  height: clamp(360px, calc(100vh - 390px), 680px);
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.admin-record-list-scroll::-webkit-scrollbar,
+.admin-support-shell .admin-thread-list::-webkit-scrollbar,
+.admin-support-shell .admin-chat-history::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.admin-record-list-scroll::-webkit-scrollbar-thumb,
+.admin-support-shell .admin-thread-list::-webkit-scrollbar-thumb,
+.admin-support-shell .admin-chat-history::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.34);
+  background-clip: padding-box;
+}
+
+.admin-record-list-scroll .admin-order-date-header,
+.admin-record-list-scroll .admin-payment-date-header {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+}
+
+.admin-record-table-scroll {
+  overflow: auto;
+}
+
+.admin-product-table-shell {
+  min-width: 760px;
+  overflow: visible;
+}
+
+.admin-product-summary-table {
+  min-width: 760px;
+  font-size: 14px;
+}
+
+.admin-product-summary-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.admin-product-summary-table tbody tr {
+  min-height: 70px;
+}
+
+.admin-product-summary-table td {
+  height: 70px;
+  font-size: 14px;
+}
+
+.admin-product-summary-table th:first-child,
+.admin-product-summary-table td:first-child {
+  width: 44px;
+}
+
+.admin-product-summary-table th:nth-child(2) {
+  width: 34%;
+}
+
+.admin-product-summary-table th:nth-child(3) {
+  width: 42%;
+}
+
+.admin-product-summary-table th:nth-child(4) {
+  width: 120px;
+}
+
+.admin-product-summary-table th:last-child,
+.admin-product-summary-table td:last-child {
+  width: 100px;
+  text-align: right;
+}
+
+.admin-product-identity-cell {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-product-identity-cell > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-product-identity-cell strong,
+.admin-product-identity-cell small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-product-identity-cell strong {
+  font-size: 16px;
+}
+
+.admin-product-identity-cell small {
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
+.admin-row-action-menu {
+  position: relative;
+  display: inline-block;
+  text-align: left;
+}
+
+.admin-row-action-menu > summary {
+  min-height: 34px;
+  list-style: none;
+}
+
+.admin-row-action-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-row-action-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 12;
+  display: grid;
+  width: 150px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.16);
+}
+
+.admin-row-action-menu-panel button {
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.admin-row-action-menu-panel button:hover {
+  background: var(--surface-muted);
+}
+
+.admin-row-action-menu-panel button.is-danger {
+  color: var(--danger);
+}
+
+.admin-media-record-scroll {
+  margin-top: 12px;
+  padding-right: 4px;
+}
+
+.admin-support-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.admin-support-shell .admin-support-summary {
+  flex: 0 0 auto;
+  min-height: 54px;
+}
+
+.admin-support-shell .admin-support-filter-chips button {
+  font-size: 13px;
+}
+
+.admin-support-shell .admin-chat-layout.admin-support-layout {
+  height: 100%;
+  min-height: 0;
+}
+
+@media (max-width: 900px) {
+  .admin-management-page-head {
+    align-items: flex-start;
+  }
+
+  .admin-record-list-scroll {
+    height: clamp(340px, 62vh, 620px);
+  }
+
+  .admin-support-shell {
+    height: calc(100vh - 130px);
+  }
+}
+
+@media (max-width: 620px) {
+  .admin-management-summary,
+  .admin-commerce-summary.admin-management-summary {
+    flex-wrap: nowrap;
+    min-height: 56px;
+  }
+
+  .admin-management-summary-item,
+  .admin-management-summary .admin-commerce-summary-card {
+    min-width: 140px;
+    padding-inline: 12px;
+  }
+
+  .admin-commerce-filter-panel,
+  .admin-customer-records-toolbar,
+  .admin-record-panel {
+    padding: 12px;
+  }
+
+  .admin-record-list-scroll {
+    height: min(62vh, 560px);
   }
 }

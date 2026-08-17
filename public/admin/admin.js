@@ -3696,7 +3696,13 @@ const renderOrdersSection = async () => {
 
   contentRoot.innerHTML = `
     <div class="admin-stack admin-commerce-section admin-orders-section">
-      <section class="admin-commerce-summary" aria-label="Order summary">
+      <header class="admin-page-head admin-management-page-head">
+        <div>
+          <h2>Order Management</h2>
+          <p>Track order progress, payment state, and fulfillment.</p>
+        </div>
+      </header>
+      <section class="admin-commerce-summary admin-management-summary" aria-label="Order summary">
         ${[
           ["All Orders", orders.length],
           ["Pending", summaryCounts.pending],
@@ -3706,12 +3712,6 @@ const renderOrdersSection = async () => {
       </section>
 
       <section class="admin-panel admin-commerce-filter-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Order Management</h3>
-            <p>Track order progress, payment state, and fulfillment.</p>
-          </div>
-        </div>
         <div class="admin-toolbar admin-commerce-toolbar">
         <label class="admin-search-field">
           <span>Search</span>
@@ -3733,14 +3733,16 @@ const renderOrdersSection = async () => {
         </div>
       </section>
 
-      <section class="admin-panel">
+      <section class="admin-panel admin-record-panel">
         <div class="admin-panel-header">
           <div>
             <h3>Orders</h3>
             <p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p>
           </div>
         </div>
-        ${renderOrderListMarkup(filtered)}
+        <div class="admin-record-list-scroll" data-admin-record-list="orders">
+          ${renderOrderListMarkup(filtered)}
+        </div>
       </section>
     </div>
   `;
@@ -4284,7 +4286,18 @@ const renderPaymentsSection = async () => {
 
   contentRoot.innerHTML = `
     <div class="admin-stack admin-commerce-section admin-payments-section">
-      <section class="admin-commerce-summary" aria-label="Payment summary">
+      <header class="admin-page-head admin-management-page-head">
+        <div>
+          <h2>Payment Records</h2>
+          <p>Review individual payment records, settlement references, and verification status.</p>
+        </div>
+        ${
+          adminState.payments.orderFilterId
+            ? '<button class="admin-secondary-button" type="button" id="payments-clear-order-filter">Clear Order Filter</button>'
+            : ""
+        }
+      </header>
+      <section class="admin-commerce-summary admin-management-summary" aria-label="Payment summary">
         ${[
           ["Total Received", receivedLabel],
           ["Pending Verification", pendingVerification],
@@ -4294,18 +4307,6 @@ const renderPaymentsSection = async () => {
       </section>
 
       <section class="admin-panel admin-commerce-filter-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Payment Records</h3>
-            <p>Review individual payment records, settlement references, and verification status.</p>
-          </div>
-          ${
-            adminState.payments.orderFilterId
-              ? '<button class="admin-secondary-button" type="button" id="payments-clear-order-filter">Clear Order Filter</button>'
-              : ""
-          }
-        </div>
-
         <div class="admin-toolbar admin-commerce-toolbar">
           <label class="admin-search-field">
             <span>Search</span>
@@ -4327,14 +4328,16 @@ const renderPaymentsSection = async () => {
         </div>
       </section>
 
-      <section class="admin-panel">
+      <section class="admin-panel admin-record-panel">
         <div class="admin-panel-header">
           <div>
             <h4>Payment Records</h4>
             <p>${formatNumber(filteredPayments.length)} result${filteredPayments.length === 1 ? "" : "s"}</p>
           </div>
         </div>
-        ${renderPaymentListMarkup(filteredPayments)}
+        <div class="admin-record-list-scroll" data-admin-record-list="payments">
+          ${renderPaymentListMarkup(filteredPayments)}
+        </div>
       </section>
     </div>
   `;
@@ -4562,11 +4565,27 @@ const renderCustomerListSection = async () => {
     if (!query) return true;
     return [customer.customerName, customer.email, customer.company, customer.country].join(" ").toLowerCase().includes(query);
   });
+  const activeCustomers = customers.filter((customer) => normalizeStatusValue(customer.customerStatus) === "active").length;
+  const wholesaleCustomers = customers.filter((customer) => customer.customerType === "wholesale").length;
+  const retailCustomers = customers.filter((customer) => customer.customerType === "retail").length;
 
   contentRoot.innerHTML = `
     <div class="admin-stack admin-customer-records">
+      <header class="admin-page-head admin-management-page-head">
+        <div>
+          <h2>Customers</h2>
+          <p>Manage customer records and account activity.</p>
+        </div>
+      </header>
+      <section class="admin-management-summary" aria-label="Customer summary">
+        ${[
+          ["Total Customers", customers.length],
+          ["Active", activeCustomers],
+          ["Retail", retailCustomers],
+          ["Wholesale", wholesaleCustomers],
+        ].map(([label, value]) => `<article class="admin-management-summary-item"><span>${escapeHtml(label)}</span><strong>${formatNumber(value)}</strong></article>`).join("")}
+      </section>
       <section class="admin-panel admin-customer-records-toolbar">
-        <div class="admin-panel-header"><div><h3>Customers</h3><p>Manage customer records and account activity.</p></div><strong>${formatNumber(customers.length)} customers</strong></div>
         <div class="admin-toolbar admin-commerce-toolbar">
           <label class="admin-search-field"><span>Search</span><input id="customer-list-search" class="admin-search-input" type="search" placeholder="Search name, email, company or country" value="${escapeHtml(adminState.customerList.query)}"></label>
           <div class="admin-customer-record-filter-grid">
@@ -4576,7 +4595,7 @@ const renderCustomerListSection = async () => {
           </div>
         </div>
       </section>
-      <section class="admin-panel"><div class="admin-panel-header"><div><h4>Customer Records</h4><p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p></div></div>${filtered.length ? `<div class="admin-customer-summary-list"><div class="admin-customer-summary-labels" aria-hidden="true"><span>Identity</span><span>Key Information</span><span>Status</span><span>Action</span></div>${filtered.map(renderAdminCustomerSummaryCard).join("")}</div>` : renderEmptyState("No customers found", "Adjust the filters to view customer records.")}</section>
+      <section class="admin-panel admin-record-panel"><div class="admin-panel-header"><div><h4>Customer Records</h4><p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p></div></div><div class="admin-record-list-scroll" data-admin-record-list="customers">${filtered.length ? `<div class="admin-customer-summary-list"><div class="admin-customer-summary-labels" aria-hidden="true"><span>Identity</span><span>Key Information</span><span>Status</span><span>Action</span></div>${filtered.map(renderAdminCustomerSummaryCard).join("")}</div>` : renderEmptyState("No customers found", "Adjust the filters to view customer records.")}</div></section>
     </div>
   `;
 
@@ -4721,6 +4740,20 @@ const updateAdminConversationListDom = () => {
   if (countNode) {
     countNode.textContent = `${formatNumber(conversations.length)} active conversation${conversations.length === 1 ? "" : "s"}`;
   }
+  const supportSummaryValues = {
+    conversations: conversations.length,
+    waiting: conversations.filter((conversation) => normalizeStatusValue(conversation.status) === "waiting_admin").length,
+    unread: conversations.reduce(
+      (total, conversation) => total + Math.max(0, Number(conversation.unreadCount || 0)),
+      0
+    ),
+  };
+  Object.entries(supportSummaryValues).forEach(([key, value]) => {
+    const summaryNode = contentRoot.querySelector(`[data-support-summary="${key}"]`);
+    if (summaryNode) {
+      summaryNode.textContent = formatNumber(value);
+    }
+  });
 
   if (!listRoot) {
     return;
@@ -4946,12 +4979,26 @@ const renderCustomersSectionView = (options = {}) => {
   const showChatPanel = !compactSupportViewport || activeMobileView === "chat";
   const showCustomerDrawer = Boolean(selected && adminState.customers.detailsOpen);
   const headerSummary = getSupportConversationHeaderSummary(selected, customerOrders);
+  const waitingConversations = conversations.filter(
+    (conversation) => normalizeStatusValue(conversation.status) === "waiting_admin"
+  ).length;
+  const unreadMessages = conversations.reduce(
+    (total, conversation) => total + Math.max(0, Number(conversation.unreadCount || 0)),
+    0
+  );
 
   adminSupportRuntime.selected = selected;
   adminState.customers.mobileView = activeMobileView;
 
   contentRoot.innerHTML = `
     <div class="admin-stack admin-support-shell ${compactSupportViewport ? "is-compact" : "is-desktop"} ${showCustomerDrawer ? "has-customer-drawer" : ""}">
+      <section class="admin-management-summary admin-support-summary" aria-label="Support summary">
+        ${[
+          ["conversations", "Conversations", conversations.length],
+          ["waiting", "Waiting Reply", waitingConversations],
+          ["unread", "Unread", unreadMessages],
+        ].map(([key, label, value]) => `<article class="admin-management-summary-item"><span>${escapeHtml(label)}</span><strong data-support-summary="${key}">${formatNumber(value)}</strong></article>`).join("")}
+      </section>
       <div class="admin-chat-layout admin-support-layout" data-support-view="${escapeHtml(activeMobileView)}">
         <section class="admin-panel admin-thread-panel" ${showThreadList ? "" : "hidden"}>
           <div class="admin-thread-panel-head">
@@ -5436,20 +5483,15 @@ const renderCustomersSection = async () => {
 };
 
 const renderProductTable = (products) => `
-  <div class="admin-table-shell">
-    <table class="admin-table">
+  <div class="admin-table-shell admin-product-table-shell">
+    <table class="admin-table admin-product-summary-table">
       <thead>
         <tr>
           <th><input type="checkbox" id="admin-product-select-all" ${products.length && products.every((product) => adminState.products.selectedIds.includes(product.id)) ? "checked" : ""}></th>
-          <th>Image</th>
-          <th>Name</th>
-          <th>Category</th>
-          <th>Price</th>
-          <th>MOQ</th>
-          <th>Shipping</th>
-          <th>Stock</th>
+          <th>Identity</th>
+          <th>Key Information</th>
           <th>Status</th>
-          <th>Actions</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody>
@@ -5458,21 +5500,31 @@ const renderProductTable = (products) => `
             (product) => `
               <tr>
                 <td><input type="checkbox" data-product-select="${escapeHtml(product.id)}" ${adminState.products.selectedIds.includes(product.id) ? "checked" : ""}></td>
-                <td><img class="admin-image-thumb" src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}"></td>
-                <td>${escapeHtml(product.name)}</td>
-                <td>${escapeHtml(product.category)}</td>
-                <td>${escapeHtml(product.price)}</td>
-                <td>${escapeHtml(product.moq)}</td>
-                <td>${escapeHtml(product.shippingTime)}</td>
-                <td>${escapeHtml(product.stock)}</td>
+                <td>
+                  <div class="admin-product-identity-cell">
+                    <img class="admin-image-thumb" src="${escapeHtml(product.image)}" alt="${escapeHtml(product.name)}">
+                    <span><strong>${escapeHtml(product.name)}</strong><small>${escapeHtml(product.category || "Uncategorized")}</small></span>
+                  </div>
+                </td>
+                <td>
+                  <strong class="admin-data-metric">${escapeHtml(product.price)}</strong>
+                  <div class="admin-data-meta-row">
+                    <span>Stock ${escapeHtml(product.stock)}</span>
+                    <span>MOQ ${escapeHtml(product.moq)}</span>
+                    <span>${escapeHtml(product.shippingTime || "Shipping not set")}</span>
+                  </div>
+                </td>
                 <td><span class="admin-pill ${getStatusClass(product.status)}">${escapeHtml(formatProductStatusLabel(product.status))}</span></td>
                 <td>
-                  <div class="admin-actions-inline">
-                    <button class="admin-secondary-button" type="button" data-product-edit="${escapeHtml(product.id)}">Quick Edit</button>
-                    <button class="admin-secondary-button" type="button" data-product-preview="${escapeHtml(product.id)}">Preview</button>
-                    <button class="admin-secondary-button" type="button" data-product-duplicate="${escapeHtml(product.id)}">Duplicate</button>
-                    <button class="admin-danger-button" type="button" data-product-delete="${escapeHtml(product.id)}">Delete</button>
-                  </div>
+                  <details class="admin-row-action-menu">
+                    <summary class="admin-secondary-button">Manage</summary>
+                    <div class="admin-row-action-menu-panel">
+                      <button type="button" data-product-edit="${escapeHtml(product.id)}">Edit</button>
+                      <button type="button" data-product-preview="${escapeHtml(product.id)}">Preview</button>
+                      <button type="button" data-product-duplicate="${escapeHtml(product.id)}">Duplicate</button>
+                      <button class="is-danger" type="button" data-product-delete="${escapeHtml(product.id)}">Delete</button>
+                    </div>
+                  </details>
                 </td>
               </tr>
             `
@@ -5493,17 +5545,28 @@ const renderProductListSection = async () => {
 
     return !query || [product.id, product.name, product.category, product.status].join(" ").toLowerCase().includes(query);
   });
+  const publishedProducts = products.filter((product) => normalizeStatusValue(product.status) === "active").length;
+  const draftProducts = products.filter((product) => normalizeStatusValue(product.status) === "draft").length;
+  const hiddenProducts = products.filter((product) => ["hidden", "archived"].includes(normalizeStatusValue(product.status))).length;
 
   contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <section class="admin-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Products</h3>
-            <p>All storefront product pages read from this catalog.</p>
-          </div>
-          <button class="admin-primary-button" type="button" id="add-product-button">Add Product</button>
+    <div class="admin-stack admin-products-management">
+      <header class="admin-page-head admin-management-page-head">
+        <div>
+          <h2>Products</h2>
+          <p>Manage the catalog used by storefront product pages.</p>
         </div>
+        <button class="admin-primary-button" type="button" id="add-product-button">Add Product</button>
+      </header>
+      <section class="admin-management-summary" aria-label="Product summary">
+        ${[
+          ["Total Products", products.length],
+          ["Published", publishedProducts],
+          ["Draft", draftProducts],
+          ["Hidden / Archived", hiddenProducts],
+        ].map(([label, value]) => `<article class="admin-management-summary-item"><span>${escapeHtml(label)}</span><strong>${formatNumber(value)}</strong></article>`).join("")}
+      </section>
+      <section class="admin-panel admin-record-panel">
         <div class="admin-library-toolbar">
           <label class="admin-search-field">Search<input id="admin-product-search" type="search" value="${escapeHtml(adminState.products.query)}" placeholder="Name, category, status"></label>
           <label>
@@ -5529,11 +5592,13 @@ const renderProductListSection = async () => {
           </label>
           <button class="admin-secondary-button" type="button" id="admin-product-bulk-apply" ${adminState.products.selectedIds.length ? "" : "disabled"}>Apply</button>
         </div>
-        ${
-          filteredProducts.length
-            ? renderProductTable(filteredProducts)
-            : renderEmptyState("No products yet", "Use Add Product to create the first catalog item.")
-        }
+        <div class="admin-record-list-scroll admin-record-table-scroll" data-admin-record-list="products">
+          ${
+            filteredProducts.length
+              ? renderProductTable(filteredProducts)
+              : renderEmptyState("No products yet", "Use Add Product to create the first catalog item.")
+          }
+        </div>
       </section>
     </div>
   `;
@@ -6929,7 +6994,12 @@ const renderMediaSection = async () => {
         </div>
       </div>
 
-      <section class="admin-panel">
+      <section class="admin-management-summary" aria-label="Media summary">
+        <article class="admin-management-summary-item"><span>Visible Assets</span><strong>${formatNumber(assets.length)}</strong></article>
+        <article class="admin-management-summary-item"><span>Storage</span><strong>Cloudinary</strong></article>
+      </section>
+
+      <section class="admin-panel admin-record-panel">
         <div class="admin-library-toolbar">
           <label class="admin-search-field">
             Search
@@ -6971,23 +7041,25 @@ const renderMediaSection = async () => {
         <p class="admin-media-status" id="admin-media-library-status" data-state="${loadError ? "error" : ""}">${
           loadError || ""
         }</p>
-        <div class="admin-library-grid">
-          ${
-            loadError
-              ? ""
-              : assets.length
-                ? assets
-                    .map((asset) =>
-                      createMediaAssetCardMarkup(asset, {
-                        actions: [
-                          { action: "copy", label: "Copy URL", className: "admin-ghost-button" },
-                          { action: "delete", label: "Delete", className: "admin-secondary-button" },
-                        ],
-                      })
-                    )
-                    .join("")
-                : renderEmptyState("No media yet", "Upload images here to reuse them across the storefront and CMS.")
-          }
+        <div class="admin-record-list-scroll admin-media-record-scroll" data-admin-record-list="media">
+          <div class="admin-library-grid">
+            ${
+              loadError
+                ? ""
+                : assets.length
+                  ? assets
+                      .map((asset) =>
+                        createMediaAssetCardMarkup(asset, {
+                          actions: [
+                            { action: "copy", label: "Copy URL", className: "admin-ghost-button" },
+                            { action: "delete", label: "Delete", className: "admin-secondary-button" },
+                          ],
+                        })
+                      )
+                      .join("")
+                  : renderEmptyState("No media yet", "Upload images here to reuse them across the storefront and CMS.")
+            }
+          </div>
         </div>
       </section>
     </div>
@@ -7695,9 +7767,6 @@ const renderSettingsSectionV4 = async () => {
     const methodsById = new Map(ADMIN_PAYMENT_METHOD_OPTIONS.map((method) => [method.id, method]));
     const paypalMethod = methodsById.get("paypal");
     const bankTransferMethod = methodsById.get("bank-transfer");
-    const futureMethods = ADMIN_PAYMENT_METHOD_OPTIONS.filter((method) =>
-      ["credit-card", "cryptocurrency"].includes(method.id)
-    );
     const providerStateInput = {
       ...bankTransferSettings,
       __paypalCurrencies: paypalCurrencies,
@@ -7762,43 +7831,46 @@ const renderSettingsSectionV4 = async () => {
     return `
       ${renderHeader()}
       <form class="admin-settings-shell admin-payment-settings-page" id="settings-form">
-        <section class="admin-payment-settings-group" aria-labelledby="active-payment-providers-title">
-          <details class="admin-payment-accordion admin-payment-section-accordion">
-            <summary>
-              <span class="admin-payment-accordion-icon" aria-hidden="true">AP</span>
-              <span class="admin-payment-accordion-copy">
-                <strong id="active-payment-providers-title">Active Payment Providers</strong>
-                <small>PayPal and Bank Transfer checkout methods</small>
-              </span>
-              <span class="admin-method-status-badge is-success">${formatNumber([paypalState.enabled, bankTransferState.enabled].filter(Boolean).length)} enabled</span>
-              <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
-            </summary>
-            <div class="admin-payment-accordion-body admin-payment-section-accordion-body">
-              <div class="admin-payment-accordion-list">
-            <details class="admin-payment-accordion">
+        <section class="admin-payment-methods" aria-labelledby="payment-methods-title">
+          <div class="admin-payment-methods-head">
+            <div>
+              <h3 id="payment-methods-title">Payment Methods</h3>
+              <p>Select a method to review or update its configuration.</p>
+            </div>
+          </div>
+          <div class="admin-payment-method-list">
+            <details class="admin-payment-accordion admin-payment-method-card" data-payment-method-card>
               <summary>
                 <span class="admin-payment-accordion-icon" aria-hidden="true">PP</span>
                 <span class="admin-payment-accordion-copy">
-                  <strong>PayPal</strong>
-                  <small>Online payment through PayPal Checkout</small>
+                  <strong>PayPal Checkout</strong>
+                  <small>Online payment via PayPal</small>
                 </span>
-                <span class="admin-method-status-badge ${paypalState.enabled ? "is-success" : ""}">${paypalState.enabled ? "Connected" : "Disabled"}</span>
+                <span class="admin-method-status-badge ${paypalState.enabled ? "is-success" : ""}">${paypalState.enabled ? "Active" : "Disabled"}</span>
                 ${renderProviderToggle(paypalMethod, paypalState)}
                 <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
               </summary>
               <div class="admin-payment-accordion-body">
                 <div class="admin-payment-config-heading">
                   <h4>PayPal Configuration</h4>
-                  <p>Control checkout currencies without changing the PayPal payment flow.</p>
+                  <p>Manage availability and currencies for PayPal Checkout.</p>
                 </div>
                 <div class="admin-payment-config-grid">
                   <div class="admin-payment-config-item">
-                    <span>Connection Status</span>
+                    <span>Status</span>
+                    <strong>${paypalState.enabled ? "Active" : "Disabled"}</strong>
+                  </div>
+                  <div class="admin-payment-config-item">
+                    <span>Settlement Account</span>
+                    <strong>${escapeHtml(settlementProvider)}</strong>
+                  </div>
+                  <div class="admin-payment-config-item">
+                    <span>Configuration Status</span>
                     <strong>${escapeHtml(paypalState.status)}</strong>
                   </div>
                   <div class="admin-payment-config-item">
-                    <span>Settlement Channel</span>
-                    <strong>${escapeHtml(settlementProvider)}</strong>
+                    <span>API &amp; Webhook</span>
+                    <strong>Managed server-side</strong>
                   </div>
                 </div>
                 <fieldset class="admin-paypal-currency-settings">
@@ -7816,17 +7888,17 @@ const renderSettingsSectionV4 = async () => {
                       </label>
                     `).join("")}
                   </div>
-                  <p class="admin-field-hint">Only selected currencies can offer PayPal on checkout and payment pages.</p>
+                  <p class="admin-field-hint">Only selected currencies can offer PayPal during checkout.</p>
                 </fieldset>
               </div>
             </details>
 
-            <details class="admin-payment-accordion">
+            <details class="admin-payment-accordion admin-payment-method-card" data-payment-method-card>
               <summary>
                 <span class="admin-payment-accordion-icon" aria-hidden="true">BT</span>
                 <span class="admin-payment-accordion-copy">
-                  <strong>Bank Transfer</strong>
-                  <small>Receive SWIFT international wire payments</small>
+                  <strong>Bank Transfer (SWIFT)</strong>
+                  <small>International wire payment</small>
                 </span>
                 <span class="admin-method-status-badge ${bankTransferState.status === "Configured" ? "is-success" : bankTransferState.status === "Incomplete" ? "is-warning" : ""}">${bankTransferEnabled ? bankTransferState.status : "Disabled"}</span>
                 ${renderProviderToggle(bankTransferMethod, bankTransferState)}
@@ -7835,104 +7907,96 @@ const renderSettingsSectionV4 = async () => {
               <div class="admin-payment-accordion-body">
                 <div class="admin-payment-config-heading">
                   <h4>Bank Transfer Configuration</h4>
-                  <p>Review provider availability here. Receiving account details are managed separately below.</p>
+                  <p>Manage SWIFT availability and WorldFirst receiving accounts.</p>
                 </div>
                 <div class="admin-payment-config-grid">
+                  <div class="admin-payment-config-item">
+                    <span>Status</span>
+                    <strong>${bankTransferEnabled ? "Active" : "Disabled"}</strong>
+                  </div>
+                  <div class="admin-payment-config-item">
+                    <span>Payment Type</span>
+                    <strong>SWIFT International Wire</strong>
+                  </div>
                   <div class="admin-payment-config-item">
                     <span>Settlement Provider</span>
                     <strong>${escapeHtml(settlementProvider)}</strong>
                   </div>
                   <div class="admin-payment-config-item">
-                    <span>Available currencies</span>
+                    <span>Supported Currencies</span>
                     <div class="admin-payment-currency-badges">
                       ${bankTransferCurrencies.map((currency) => `<span class="${currency.configured ? "is-configured" : ""}">${escapeHtml(currency.label)}</span>`).join("")}
                     </div>
                   </div>
                 </div>
-              </div>
-            </details>
-              </div>
-            </div>
-          </details>
-        </section>
-
-        <section class="admin-payment-settings-group" aria-labelledby="settlement-accounts-title">
-          <details class="admin-payment-accordion admin-payment-section-accordion">
-            <summary>
-              <span class="admin-payment-accordion-icon" aria-hidden="true">SA</span>
-              <span class="admin-payment-accordion-copy">
-                <strong id="settlement-accounts-title">Settlement Accounts</strong>
-                <small>Receiving accounts managed independently from payment methods</small>
-              </span>
-              <span class="admin-method-status-badge ${configuredCurrencies.length ? "is-success" : "is-warning"}">${escapeHtml(bankTransferSummary)}</span>
-              <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
-            </summary>
-            <div class="admin-payment-accordion-body admin-payment-section-accordion-body">
-              <details class="admin-payment-accordion admin-settlement-accordion">
-                <summary>
-                  <span class="admin-payment-accordion-icon" aria-hidden="true">WF</span>
-                  <span class="admin-payment-accordion-copy">
-                    <strong>${escapeHtml(settlementProvider)}</strong>
-                    <small>USD and HKD SWIFT receiving accounts</small>
-                  </span>
-                  <span class="admin-method-status-badge ${configuredCurrencies.length ? "is-success" : "is-warning"}">${escapeHtml(bankTransferSummary)}</span>
-                  <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
-                </summary>
-                <div class="admin-payment-accordion-body">
-                  ${bankTransferEnabled && !configuredCurrencies.length ? `
-                    <div class="admin-settings-warning">
-                      <strong>Configuration needed</strong>
-                      <p>Bank Transfer is enabled, but no complete SWIFT receiving account is available yet.</p>
-                    </div>
-                  ` : ""}
-                  <div class="admin-settlement-account-grid">
-                    ${bankTransferCurrencies.map((currency) => `
-                      <section class="admin-settlement-account-card">
-                        <div class="admin-payment-account-header">
-                          <div>
-                            <h4>${escapeHtml(currency.label)} Account</h4>
-                            <p>${currency.configured ? "Ready for customer payment instructions." : "Complete all required account details."}</p>
-                          </div>
-                          <span class="admin-method-status-badge ${currency.configured ? "is-success" : "is-warning"}">${currency.configured ? "Configured" : "Incomplete"}</span>
-                        </div>
-                        <div class="admin-form-grid">
-                          ${renderAccountFields(currency)}
-                        </div>
-                      </section>
-                    `).join("")}
+                ${bankTransferEnabled && !configuredCurrencies.length ? `
+                  <div class="admin-settings-warning">
+                    <strong>Configuration needed</strong>
+                    <p>Bank Transfer is enabled, but no complete SWIFT receiving account is available yet.</p>
+                  </div>
+                ` : ""}
+                <div class="admin-payment-subsection-head">
+                  <div>
+                    <h4>Receiving Accounts</h4>
+                    <p>${escapeHtml(bankTransferSummary)}</p>
                   </div>
                 </div>
-              </details>
-            </div>
-          </details>
-        </section>
-
-        <section class="admin-payment-settings-group" aria-labelledby="future-payment-methods-title">
-          <details class="admin-payment-accordion admin-future-payment-accordion">
-            <summary>
-              <span class="admin-payment-accordion-icon" aria-hidden="true">FP</span>
-              <span class="admin-payment-accordion-copy">
-                <strong id="future-payment-methods-title">Future Payment Methods</strong>
-                <small>Providers that are not connected to checkout</small>
-              </span>
-              <span class="admin-method-status-badge">Coming Soon</span>
-              <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
-            </summary>
-            <div class="admin-payment-accordion-body">
-              <div class="admin-future-payment-list">
-                ${futureMethods.map((method) => `
-                  <article class="admin-future-payment-card">
-                    <span class="admin-payment-accordion-icon" aria-hidden="true">${method.id === "credit-card" ? "CC" : "CR"}</span>
-                    <div>
-                      <strong>${escapeHtml(method.label)}</strong>
-                      <p>${escapeHtml(method.description)}</p>
-                    </div>
-                    <span class="admin-method-status-badge">Coming Soon</span>
-                  </article>
-                `).join("")}
+                <div class="admin-settlement-account-grid">
+                  ${bankTransferCurrencies.map((currency) => `
+                    <section class="admin-settlement-account-card">
+                      <div class="admin-payment-account-header">
+                        <div>
+                          <h4>${escapeHtml(currency.label)} Account</h4>
+                          <p>${currency.configured ? "Ready for payment instructions." : "Complete required account details."}</p>
+                        </div>
+                        <span class="admin-method-status-badge ${currency.configured ? "is-success" : "is-warning"}">${currency.configured ? "Configured" : "Incomplete"}</span>
+                      </div>
+                      <div class="admin-form-grid">
+                        ${renderAccountFields(currency)}
+                      </div>
+                    </section>
+                  `).join("")}
+                </div>
               </div>
-            </div>
-          </details>
+            </details>
+
+            <details class="admin-payment-accordion admin-payment-method-card is-future" data-payment-method-card>
+              <summary>
+                <span class="admin-payment-accordion-icon" aria-hidden="true">CC</span>
+                <span class="admin-payment-accordion-copy">
+                  <strong>Credit / Debit Card</strong>
+                  <small>Card payment integration</small>
+                </span>
+                <span class="admin-method-status-badge">Coming Soon</span>
+                <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
+              </summary>
+              <div class="admin-payment-accordion-body">
+                <div class="admin-payment-config-grid">
+                  <div class="admin-payment-config-item"><span>Status</span><strong>Coming Soon</strong></div>
+                  <div class="admin-payment-config-item"><span>Provider</span><strong>Not Connected</strong></div>
+                  <div class="admin-payment-config-item"><span>Integration</span><strong>Unavailable</strong></div>
+                </div>
+              </div>
+            </details>
+
+            <details class="admin-payment-accordion admin-payment-method-card is-future" data-payment-method-card>
+              <summary>
+                <span class="admin-payment-accordion-icon" aria-hidden="true">CR</span>
+                <span class="admin-payment-accordion-copy">
+                  <strong>Cryptocurrency</strong>
+                  <small>Digital asset payment integration</small>
+                </span>
+                <span class="admin-method-status-badge">Coming Soon</span>
+                <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
+              </summary>
+              <div class="admin-payment-accordion-body">
+                <div class="admin-payment-config-grid">
+                  <div class="admin-payment-config-item"><span>Status</span><strong>Coming Soon</strong></div>
+                  <div class="admin-payment-config-item"><span>Provider</span><strong>Not Connected</strong></div>
+                </div>
+              </div>
+            </details>
+          </div>
         </section>
 
         <div class="admin-actions-inline admin-payment-settings-actions">
@@ -7956,6 +8020,20 @@ const renderSettingsSectionV4 = async () => {
   contentRoot.querySelectorAll("[data-payment-provider-toggle]").forEach((toggle) => {
     toggle.addEventListener("click", (event) => event.stopPropagation());
     toggle.addEventListener("keydown", (event) => event.stopPropagation());
+  });
+
+  const paymentMethodCards = Array.from(contentRoot.querySelectorAll("[data-payment-method-card]"));
+  paymentMethodCards.forEach((card) => {
+    card.addEventListener("toggle", () => {
+      if (!card.open) {
+        return;
+      }
+      paymentMethodCards.forEach((otherCard) => {
+        if (otherCard !== card) {
+          otherCard.open = false;
+        }
+      });
+    });
   });
 
   const form = document.querySelector("#settings-form");
