@@ -4760,7 +4760,7 @@ textarea {
 
 .admin-order-date-groups {
   display: grid;
-  gap: 20px;
+  gap: 14px;
 }
 
 .admin-order-date-group {
@@ -4774,8 +4774,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 46px;
-  padding: 10px 16px;
+  min-height: 40px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(90deg, rgba(219, 234, 254, 0.62), rgba(248, 250, 252, 0.92));
 }
@@ -4819,38 +4819,39 @@ textarea {
 
 .admin-order-group-body {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 5px;
+  padding: 8px;
 }
 
 .admin-order-group-labels,
 .admin-order-main-card {
   display: grid;
   grid-template-columns:
-    minmax(210px, 1.75fr)
-    minmax(115px, 1fr)
-    60px
-    minmax(88px, 0.72fr)
-    minmax(108px, 0.88fr)
-    minmax(105px, 0.85fr)
-    minmax(104px, 0.85fr)
-    64px;
+    minmax(220px, 1.7fr)
+    minmax(100px, 0.9fr)
+    minmax(68px, 0.55fr)
+    minmax(82px, 0.68fr)
+    minmax(104px, 0.84fr)
+    minmax(96px, 0.8fr)
+    minmax(96px, 0.8fr)
+    58px;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .admin-order-group-labels {
-  padding: 0 14px 4px;
+  padding: 0 11px 2px;
   color: var(--text-faint);
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   font-weight: 800;
   letter-spacing: 0.035em;
   text-transform: uppercase;
 }
 
 .admin-order-main-card {
+  min-height: 68px;
   min-width: 0;
-  padding: 14px;
+  padding: 9px 11px;
   border: 1px solid rgba(203, 213, 225, 0.82);
   border-radius: 14px;
   background: var(--surface);
@@ -4867,7 +4868,7 @@ textarea {
 .admin-order-card-cell {
   display: grid;
   justify-items: start;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -4875,7 +4876,7 @@ textarea {
   max-width: 100%;
   overflow: hidden;
   color: var(--text);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4883,7 +4884,36 @@ textarea {
 
 .admin-order-card-cell > small {
   color: var(--text-faint);
-  font-size: 0.72rem;
+  font-size: 0.67rem;
+}
+
+.admin-order-card-order-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.admin-order-card-order-meta > strong {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--text);
+  font-size: 0.8rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-order-card-order-meta > small {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 0.61rem;
+  white-space: nowrap;
+}
+
+.admin-order-card-order-meta > small span {
+  font-weight: 750;
 }
 
 .admin-order-card-cell .admin-pill {
@@ -4907,45 +4937,44 @@ textarea {
 }
 
 .admin-order-stage-line {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  width: min(100%, 210px);
-  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  width: min(100%, 218px);
+  margin-top: 3px;
 }
 
 .admin-order-stage-line::before {
-  content: "";
-  position: absolute;
-  top: 4px;
-  right: 16.66%;
-  left: 16.66%;
-  height: 2px;
-  background: var(--line-strong);
+  display: none;
 }
 
 .admin-order-stage {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  justify-items: center;
+  display: flex;
+  align-items: center;
   gap: 4px;
-  min-width: 0;
+  flex: 0 0 auto;
   color: var(--text-faint);
 }
 
+.admin-order-stage:not(:last-child)::after {
+  content: "";
+  width: 12px;
+  height: 1px;
+  margin: 0 5px 0 1px;
+  background: var(--line-strong);
+}
+
 .admin-order-stage i {
-  width: 10px;
-  height: 10px;
-  border: 2px solid var(--surface);
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border: 1px solid var(--surface);
   border-radius: 999px;
   background: var(--line-strong);
   box-shadow: 0 0 0 1px var(--line-strong);
 }
 
 .admin-order-stage small {
-  overflow: hidden;
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-style: normal;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -5064,24 +5093,6 @@ textarea {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .admin-order-group-labels {
-    display: none;
-  }
-
-  .admin-order-main-card {
-    grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(120px, 1fr));
-    align-items: start;
-    row-gap: 16px;
-  }
-
-  .admin-order-mobile-label {
-    display: block;
-  }
-
-  .admin-order-card-action {
-    justify-items: start;
-  }
-
   .admin-payment-group-labels {
     display: none;
   }
@@ -5097,6 +5108,26 @@ textarea {
   }
 
   .admin-payment-card-action {
+    justify-items: start;
+  }
+}
+
+@media (max-width: 1100px) {
+  .admin-order-group-labels {
+    display: none;
+  }
+
+  .admin-order-main-card {
+    grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(110px, 1fr));
+    align-items: start;
+    row-gap: 12px;
+  }
+
+  .admin-order-mobile-label {
+    display: block;
+  }
+
+  .admin-order-card-action {
     justify-items: start;
   }
 }
@@ -5152,8 +5183,8 @@ textarea {
 
   .admin-order-main-card {
     grid-template-columns: 1fr;
-    gap: 14px;
-    padding: 13px;
+    gap: 10px;
+    padding: 12px;
   }
 
   .admin-order-card-identity {

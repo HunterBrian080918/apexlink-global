@@ -3060,11 +3060,15 @@ const renderAdminOrderTimeline = (order) => {
 
 const renderAdminOrderCard = (order) => {
   const itemCount = getAdminOrderItemCount(order);
+  const createdDate = getAdminOrderDateGroup(order.createdAt).label;
   return `
     <article class="admin-order-main-card">
       <div class="admin-order-card-cell admin-order-card-identity">
         <span class="admin-order-mobile-label">Order #</span>
-        <strong class="admin-mono">${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
+        <div class="admin-order-card-order-meta">
+          <strong class="admin-mono">${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
+          <small><span>Created</span> ${escapeHtml(createdDate)}</small>
+        </div>
         ${renderAdminOrderTimeline(order)}
       </div>
       <div class="admin-order-card-cell">
@@ -3074,8 +3078,7 @@ const renderAdminOrderCard = (order) => {
       </div>
       <div class="admin-order-card-cell">
         <span class="admin-order-mobile-label">Items</span>
-        <strong>${formatNumber(itemCount)}</strong>
-        <small>${itemCount === 1 ? "item" : "items"}</small>
+        <strong>${formatNumber(itemCount)} ${itemCount === 1 ? "item" : "items"}</strong>
       </div>
       <div class="admin-order-card-cell">
         <span class="admin-order-mobile-label">Total</span>
