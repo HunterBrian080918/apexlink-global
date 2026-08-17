@@ -762,7 +762,7 @@ const createAdminChatMessageMarkup = (message, selectedConversation) => {
 const createAdminConversationRowMarkup = (thread, selectedId) => `
   <button
     type="button"
-    class="admin-thread-row ${thread.id === selectedId ? "is-active" : ""}"
+    class="admin-thread-row admin-data-list-row ${thread.id === selectedId ? "is-active" : ""}"
     data-thread-id="${escapeHtml(thread.id)}"
   >
     <span class="admin-thread-avatar" aria-hidden="true">${escapeHtml(
@@ -788,6 +788,10 @@ const createAdminConversationRowMarkup = (thread, selectedId) => `
 `;
 
 const formatNumber = (value) => new Intl.NumberFormat().format(Number(value || 0));
+const formatCompactIdentifier = (value) => {
+  const identifier = String(value || "-").trim() || "-";
+  return identifier.length > 16 ? `${identifier.slice(0, 8)}...` : identifier;
+};
 const formatMoney = (value, currency = "USD") => {
   const amount = Number(value || 0);
 
@@ -2264,13 +2268,23 @@ const openAdminOrderDetail = async (orderId, routeMode = "push") => {
     return;
   }
 
+  const canOpenInPlace =
+    adminState.activeSection === "orders" && Boolean(contentRoot.querySelector(".admin-order-date-groups"));
   adminState.activeSection = "orders";
   adminState.orders.selectedId = nextOrderId;
   adminState.payments.mode = "list";
   adminState.payments.selectedId = null;
   syncAdminRoute(routeMode);
+
+  if (canOpenInPlace) {
+    await renderOrderDetailDrawer();
+    return;
+  }
+
   await renderCurrentSection();
 };
+
+const ADMIN_DETAIL_DRAWER_TRANSITION_MS = 240;
 
 const renderAdminDetailDrawer = ({ eyebrow = "Details", title = "Details", description = "", content = "" } = {}) => `
   <button class="admin-detail-drawer-backdrop" type="button" data-admin-detail-drawer-close aria-label="Close details"></button>
@@ -2287,9 +2301,37 @@ const renderAdminDetailDrawer = ({ eyebrow = "Details", title = "Details", descr
   </aside>
 `;
 
+const removeAdminDetailDrawerImmediately = () => {
+  contentRoot.querySelector(".admin-detail-drawer")?.remove();
+  contentRoot.querySelector(".admin-detail-drawer-backdrop")?.remove();
+};
+
+const closeAdminDetailDrawer = (onClose) => {
+  const drawer = contentRoot.querySelector(".admin-detail-drawer");
+  const backdrop = contentRoot.querySelector(".admin-detail-drawer-backdrop");
+
+  if (!drawer) {
+    onClose?.();
+    return;
+  }
+
+  if (drawer.classList.contains("is-closing")) {
+    return;
+  }
+
+  drawer.classList.add("is-closing");
+  backdrop?.classList.add("is-closing");
+  onClose?.();
+
+  window.setTimeout(() => {
+    drawer.remove();
+    backdrop?.remove();
+  }, ADMIN_DETAIL_DRAWER_TRANSITION_MS);
+};
+
 const bindAdminDetailDrawerClose = (onClose) => {
   contentRoot.querySelectorAll("[data-admin-detail-drawer-close]").forEach((control) => {
-    control.addEventListener("click", onClose);
+    control.addEventListener("click", () => closeAdminDetailDrawer(onClose));
   });
 };
 
@@ -3038,86 +3080,32 @@ const groupAdminOrdersByDate = (orders) => {
   return Array.from(groups.values());
 };
 
-const getAdminOrderTimelineState = (order) => {
-  const paymentStatus = normalizeStatusValue(order.paymentStatus);
-  const shippingStatus = normalizeStatusValue(order.shippingStatus);
-  const orderStatus = normalizeStatusValue(order.orderStatus);
-  const paymentComplete = ["paid", "deposit_paid", "partially_paid"].includes(paymentStatus);
-  const fulfillmentStarted =
-    ["preparing", "packed", "shipped", "in_transit", "delivered"].includes(shippingStatus) ||
-    [
-      "processing",
-      "deposit_paid",
-      "in_production",
-      "quality_inspection",
-      "awaiting_balance",
-      "balance_paid",
-      "ready_to_ship",
-      "shipped",
-      "delivered",
-      "completed",
-    ].includes(orderStatus);
-  const fulfillmentComplete =
-    shippingStatus === "delivered" || ["delivered", "completed"].includes(orderStatus);
-
-  return { paymentComplete, fulfillmentStarted, fulfillmentComplete };
-};
-
-const renderAdminOrderTimeline = (order) => {
-  const timeline = getAdminOrderTimelineState(order);
-  const paymentClass = timeline.paymentComplete ? "is-complete" : "is-pending";
-  const fulfillmentClass = timeline.fulfillmentComplete
-    ? "is-complete"
-    : timeline.fulfillmentStarted
-      ? "is-active"
-      : "is-pending";
-
-  return `
-    <div class="admin-order-stage-line" aria-label="Order progress: Created, Payment, Fulfillment">
-      <span class="admin-order-stage is-complete"><i aria-hidden="true"></i><small>Created</small></span>
-      <span class="admin-order-stage ${paymentClass}"><i aria-hidden="true"></i><small>Payment</small></span>
-      <span class="admin-order-stage ${fulfillmentClass}"><i aria-hidden="true"></i><small>Fulfillment</small></span>
-    </div>
-  `;
-};
-
 const renderAdminOrderCard = (order) => {
   const itemCount = getAdminOrderItemCount(order);
   const createdDate = getAdminOrderDateGroup(order.createdAt).label;
+  const orderIdentity = order.orderNumber || order.orderId || order.id || "-";
   return `
     <article class="admin-order-main-card admin-summary-card">
       <div class="admin-order-card-cell admin-order-card-identity">
-        <span class="admin-order-mobile-label">Order #</span>
-        <div class="admin-order-card-order-meta">
-          <strong class="admin-mono">${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
-          <small><span>Created</span> ${escapeHtml(createdDate)}</small>
-        </div>
-        ${renderAdminOrderTimeline(order)}
+        <span class="admin-order-mobile-label">Identity</span>
+        <span class="admin-data-label">Order</span>
+        <strong class="admin-mono admin-data-identity">${escapeHtml(formatCompactIdentifier(orderIdentity))}</strong>
+        <small>Created ${escapeHtml(createdDate)}</small>
       </div>
-      <div class="admin-order-card-cell">
-        <span class="admin-order-mobile-label">Customer</span>
+      <div class="admin-order-card-cell admin-data-key-info">
+        <span class="admin-order-mobile-label">Key Information</span>
         <strong>${escapeHtml(order.customerName || "Unknown Customer")}</strong>
-        <small>${escapeHtml(formatStatusLabel(order.purchaseMode || "retail"))}</small>
+        <div class="admin-data-meta-row">
+          <span>${escapeHtml(formatStatusLabel(order.purchaseMode || "retail"))}</span>
+          <span>${formatNumber(itemCount)} ${itemCount === 1 ? "item" : "items"}</span>
+        </div>
+        <strong class="admin-data-metric">${escapeHtml(order.totalAmount || order.subtotal || "-")}</strong>
       </div>
-      <div class="admin-order-card-cell">
-        <span class="admin-order-mobile-label">Items</span>
-        <strong>${formatNumber(itemCount)} ${itemCount === 1 ? "item" : "items"}</strong>
-      </div>
-      <div class="admin-order-card-cell">
-        <span class="admin-order-mobile-label">Total</span>
-        <strong>${escapeHtml(order.totalAmount || order.subtotal || "-")}</strong>
-      </div>
-      <div class="admin-order-card-cell">
-        <span class="admin-order-mobile-label">Order Status</span>
-        <span class="admin-pill ${getAdminPillStatusClass(order.orderStatus)}">${escapeHtml(formatStatusLabel(order.orderStatus || "pending"))}</span>
-      </div>
-      <div class="admin-order-card-cell">
-        <span class="admin-order-mobile-label">Payment Status</span>
-        <span class="admin-pill ${getAdminPillStatusClass(order.paymentStatus)}">${escapeHtml(formatPaymentStatusLabel(order.paymentStatus || "unpaid"))}</span>
-      </div>
-      <div class="admin-order-card-cell">
-        <span class="admin-order-mobile-label">Fulfillment</span>
-        <span class="admin-pill ${getAdminPillStatusClass(order.shippingStatus)}">${escapeHtml(formatStatusLabel(order.shippingStatus || "not_started"))}</span>
+      <div class="admin-order-card-cell admin-data-status-stack">
+        <span class="admin-order-mobile-label">Status</span>
+        <div><small>Order</small><span class="admin-pill ${getAdminPillStatusClass(order.orderStatus)}">${escapeHtml(formatStatusLabel(order.orderStatus || "pending"))}</span></div>
+        <div><small>Payment</small><span class="admin-pill ${getAdminPillStatusClass(order.paymentStatus)}">${escapeHtml(formatPaymentStatusLabel(order.paymentStatus || "unpaid"))}</span></div>
+        <div><small>Fulfillment</small><span class="admin-pill ${getAdminPillStatusClass(order.shippingStatus)}">${escapeHtml(formatStatusLabel(order.shippingStatus || "not_started"))}</span></div>
       </div>
       <div class="admin-order-card-cell admin-order-card-action">
         <span class="admin-order-mobile-label">Action</span>
@@ -3142,13 +3130,9 @@ const renderOrderListMarkup = (orders) =>
                 </header>
                 <div class="admin-order-group-body">
                   <div class="admin-order-group-labels" aria-hidden="true">
-                    <span>Order #</span>
-                    <span>Customer</span>
-                    <span>Items</span>
-                    <span>Total</span>
-                    <span>Order Status</span>
-                    <span>Payment Status</span>
-                    <span>Fulfillment</span>
+                    <span>Identity</span>
+                    <span>Key Information</span>
+                    <span>Status</span>
                     <span>Action</span>
                   </div>
                   ${group.orders.map(renderAdminOrderCard).join("")}
@@ -3579,29 +3563,26 @@ const bindOrderDetailInteractions = (selected) => {
 };
 
 const getAdminOrderDetailData = async (orderId) => {
-  const [selected, selectedPayments] = await Promise.all([
+  const [selected, selectedPayments, timelineResult] = await Promise.all([
     fetchAdminOrder(orderId),
     fetchAdminOrderPayments(orderId),
+    fetchAdminOrderEvents(orderId)
+      .then((items) => ({ items: sortTimelineEvents(items), error: "" }))
+      .catch((error) => ({ items: [], error: error?.message || "Unknown error." })),
   ]);
 
   if (!selected) {
     return { selected: null, selectedPayments: [], timelineState: null };
   }
 
-  if (adminState.orders.timeline.orderId !== orderId) {
-    void loadAdminOrderTimeline(orderId);
-  }
-
-  const timelineState =
-    adminState.orders.timeline.orderId === orderId
-      ? adminState.orders.timeline
-      : {
-          orderId,
-          loading: true,
-          error: "",
-          items: [],
-          requestId: 0,
-        };
+  const timelineState = {
+    orderId,
+    loading: false,
+    error: timelineResult.error,
+    items: timelineResult.items,
+    requestId: Date.now(),
+  };
+  adminState.orders.timeline = timelineState;
 
   return { selected, selectedPayments, timelineState };
 };
@@ -3612,6 +3593,7 @@ const renderOrderDetailDrawer = async () => {
     return;
   }
 
+  removeAdminDetailDrawerImmediately();
   contentRoot.insertAdjacentHTML(
     "beforeend",
     renderAdminDetailDrawer({
@@ -3621,10 +3603,9 @@ const renderOrderDetailDrawer = async () => {
     })
   );
 
-  const closeDrawer = async () => {
+  const closeDrawer = () => {
     adminState.orders.selectedId = null;
     syncAdminRoute("replace");
-    await renderCurrentSection();
   };
   bindAdminDetailDrawerClose(closeDrawer);
 
@@ -3891,40 +3872,27 @@ const groupAdminPaymentsByDate = (payments) => {
 };
 
 const renderAdminPaymentCard = (payment) => {
+  const paymentIdentity = payment.paymentId || payment.id || "-";
   return `
     <article class="admin-payment-main-card admin-summary-card">
       <div class="admin-payment-card-cell admin-payment-card-identity">
-        <span class="admin-payment-mobile-label">Payment ID</span>
-        <strong class="admin-mono">${escapeHtml(payment.paymentId || payment.id || "-")}</strong>
+        <span class="admin-payment-mobile-label">Identity</span>
+        <span class="admin-data-label">Payment</span>
+        <strong class="admin-mono admin-data-identity">${escapeHtml(formatCompactIdentifier(paymentIdentity))}</strong>
+        <small>Created ${escapeHtml(formatShortDate(payment.createdAt))}</small>
       </div>
-      <div class="admin-payment-card-cell">
-        <span class="admin-payment-mobile-label">Order #</span>
-        <strong class="admin-mono">${escapeHtml(payment.orderNumberDisplay || payment.orderId || "-")}</strong>
+      <div class="admin-payment-card-cell admin-data-key-info">
+        <span class="admin-payment-mobile-label">Key Information</span>
+        <strong class="admin-data-metric">${escapeHtml(formatMoney(payment.amount, payment.currency))}</strong>
+        <div class="admin-data-meta-row">
+          <span class="admin-mono">Order ${escapeHtml(formatCompactIdentifier(payment.orderNumberDisplay || payment.orderId || "-"))}</span>
+          <span>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</span>
+        </div>
+        <small>${escapeHtml(payment.customerDisplay || payment.customer || "Unknown Customer")}${payment.linkedOrder?.purchaseMode ? ` / ${escapeHtml(formatStatusLabel(payment.linkedOrder.purchaseMode))}` : ""}</small>
       </div>
-      <div class="admin-payment-card-cell">
-        <span class="admin-payment-mobile-label">Customer</span>
-        <strong>${escapeHtml(payment.customerDisplay || payment.customer || "Unknown Customer")}</strong>
-        ${payment.linkedOrder?.purchaseMode ? `<small>${escapeHtml(formatStatusLabel(payment.linkedOrder.purchaseMode))}</small>` : ""}
-      </div>
-      <div class="admin-payment-card-cell admin-payment-card-amount">
-        <span class="admin-payment-mobile-label">Amount</span>
-        <strong>${escapeHtml(formatMoney(payment.amount, payment.currency))}</strong>
-      </div>
-      <div class="admin-payment-card-cell">
-        <span class="admin-payment-mobile-label">Currency</span>
-        <strong>${escapeHtml(String(payment.currency || "USD").toUpperCase())}</strong>
-      </div>
-      <div class="admin-payment-card-cell">
-        <span class="admin-payment-mobile-label">Method</span>
-        <strong>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</strong>
-      </div>
-      <div class="admin-payment-card-cell">
+      <div class="admin-payment-card-cell admin-data-status-stack">
         <span class="admin-payment-mobile-label">Status</span>
         <span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span>
-      </div>
-      <div class="admin-payment-card-cell">
-        <span class="admin-payment-mobile-label">Created</span>
-        <strong>${escapeHtml(formatShortDate(payment.createdAt))}</strong>
       </div>
       <div class="admin-payment-card-cell admin-payment-card-action">
         <span class="admin-payment-mobile-label">Action</span>
@@ -3949,14 +3917,9 @@ const renderPaymentListMarkup = (payments) =>
                 </header>
                 <div class="admin-payment-group-body">
                   <div class="admin-payment-group-labels" aria-hidden="true">
-                    <span>Payment ID</span>
-                    <span>Order #</span>
-                    <span>Customer</span>
-                    <span>Amount</span>
-                    <span>Currency</span>
-                    <span>Method</span>
+                    <span>Identity</span>
+                    <span>Key Information</span>
                     <span>Status</span>
-                    <span>Created</span>
                     <span>Action</span>
                   </div>
                   ${group.payments.map(renderAdminPaymentCard).join("")}
@@ -4190,6 +4153,7 @@ const renderPaymentDetailDrawer = async () => {
     return;
   }
 
+  removeAdminDetailDrawerImmediately();
   contentRoot.insertAdjacentHTML(
     "beforeend",
     renderAdminDetailDrawer({
@@ -4199,11 +4163,10 @@ const renderPaymentDetailDrawer = async () => {
     })
   );
 
-  const closeDrawer = async () => {
+  const closeDrawer = () => {
     adminState.payments.mode = "list";
     adminState.payments.selectedId = null;
     syncAdminRoute("replace");
-    await renderCurrentSection();
   };
   bindAdminDetailDrawerClose(closeDrawer);
 
@@ -4399,7 +4362,7 @@ const renderPaymentsSection = async () => {
       adminState.payments.mode = "detail";
       adminState.payments.selectedId = button.dataset.paymentView || null;
       syncAdminRoute("push");
-      await renderCurrentSection();
+      await renderPaymentDetailDrawer();
     });
   });
 
@@ -4557,6 +4520,34 @@ const renderAdminCustomerDetail = (customer, { drawerMode = false } = {}) => {
   `;
 };
 
+const renderAdminCustomerSummaryCard = (customer) => `
+  <article class="admin-customer-summary-card admin-summary-card">
+    <div class="admin-data-identity-cell">
+      <span class="admin-summary-mobile-label">Identity</span>
+      <span class="admin-data-label">Customer</span>
+      <strong class="admin-data-identity">${escapeHtml(customer.customerName || "Customer")}</strong>
+      <small>${escapeHtml(formatStatusLabel(customer.customerType || "retail"))}</small>
+    </div>
+    <div class="admin-data-key-info">
+      <span class="admin-summary-mobile-label">Key Information</span>
+      <strong class="admin-data-metric">${escapeHtml(customer.totalSpend)}</strong>
+      <div class="admin-data-meta-row">
+        <span>${formatNumber(customer.orders.length)} ${customer.orders.length === 1 ? "order" : "orders"}</span>
+        <span>${escapeHtml(customer.country || "Country unavailable")}</span>
+      </div>
+      <small>Last activity ${escapeHtml(formatShortDate(customer.lastActivity))}</small>
+    </div>
+    <div class="admin-data-status-stack">
+      <span class="admin-summary-mobile-label">Status</span>
+      <span class="admin-pill ${getAdminPillStatusClass(customer.customerStatus)}">${escapeHtml(formatStatusLabel(customer.customerStatus))}</span>
+    </div>
+    <div class="admin-summary-card-action">
+      <span class="admin-summary-mobile-label">Action</span>
+      <button class="admin-secondary-button admin-table-action" type="button" data-customer-record="${escapeHtml(customer.key)}">View</button>
+    </div>
+  </article>
+`;
+
 const renderCustomerListSection = async () => {
   const [orders, conversations] = await Promise.all([fetchAdminOrders(), fetchAdminSupportConversations()]);
   const customers = buildAdminCustomerRecords(orders, conversations);
@@ -4585,7 +4576,7 @@ const renderCustomerListSection = async () => {
           </div>
         </div>
       </section>
-      <section class="admin-panel"><div class="admin-panel-header"><div><h4>Customer Records</h4><p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p></div></div>${filtered.length ? `<div class="admin-customer-summary-list"><div class="admin-customer-summary-labels" aria-hidden="true"><span>Customer</span><span>Country</span><span>Orders</span><span>Total Spend</span><span>Last Activity</span><span>Action</span></div>${filtered.map((customer) => `<article class="admin-customer-summary-card admin-summary-card"><div><span class="admin-summary-mobile-label">Customer</span><strong>${escapeHtml(customer.customerName || "Customer")}</strong></div><div><span class="admin-summary-mobile-label">Country</span><strong>${escapeHtml(customer.country || "-")}</strong></div><div><span class="admin-summary-mobile-label">Orders</span><strong>${formatNumber(customer.orders.length)}</strong></div><div><span class="admin-summary-mobile-label">Total Spend</span><strong>${escapeHtml(customer.totalSpend)}</strong></div><div><span class="admin-summary-mobile-label">Last Activity</span><strong>${escapeHtml(formatShortDate(customer.lastActivity))}</strong></div><div class="admin-summary-card-action"><span class="admin-summary-mobile-label">Action</span><button class="admin-secondary-button admin-table-action" type="button" data-customer-record="${escapeHtml(customer.key)}">View</button></div></article>`).join("")}</div>` : renderEmptyState("No customers found", "Adjust the filters to view customer records.")}</section>
+      <section class="admin-panel"><div class="admin-panel-header"><div><h4>Customer Records</h4><p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p></div></div>${filtered.length ? `<div class="admin-customer-summary-list"><div class="admin-customer-summary-labels" aria-hidden="true"><span>Identity</span><span>Key Information</span><span>Status</span><span>Action</span></div>${filtered.map(renderAdminCustomerSummaryCard).join("")}</div>` : renderEmptyState("No customers found", "Adjust the filters to view customer records.")}</section>
     </div>
   `;
 
@@ -4599,30 +4590,28 @@ const renderCustomerListSection = async () => {
       await renderCurrentSection();
     });
   });
-  contentRoot.querySelectorAll("[data-customer-record]").forEach((button) => button.addEventListener("click", async () => {
-    adminState.customerList.selectedKey = button.dataset.customerRecord || null;
-    adminState.customerList.mode = "detail";
-    await renderCurrentSection();
-  }));
+  const openCustomerDetailDrawer = (customer) => {
+    if (!customer) {
+      return;
+    }
 
-  if (adminState.customerList.mode === "detail" && selected) {
+    removeAdminDetailDrawerImmediately();
     contentRoot.insertAdjacentHTML(
       "beforeend",
       renderAdminDetailDrawer({
         eyebrow: "Customer Details",
-        title: selected.customerName || "Customer",
-        description: selected.email || "Customer profile and activity",
-        content: renderAdminCustomerDetail(selected, { drawerMode: true }),
+        title: customer.customerName || "Customer",
+        description: customer.email || "Customer profile and activity",
+        content: renderAdminCustomerDetail(customer, { drawerMode: true }),
       })
     );
-    bindAdminDetailDrawerClose(async () => {
+    bindAdminDetailDrawerClose(() => {
       adminState.customerList.mode = "list";
       adminState.customerList.selectedKey = null;
-      await renderCurrentSection();
     });
     document.querySelector("#customer-open-support")?.addEventListener("click", async () => {
       adminState.activeSection = "support";
-      adminState.customers.selectedId = selected.conversations[0]?.id || null;
+      adminState.customers.selectedId = customer.conversations[0]?.id || null;
       adminState.customers.detailsOpen = false;
       syncAdminRoute("push");
       await renderCurrentSection();
@@ -4630,6 +4619,18 @@ const renderCustomerListSection = async () => {
     contentRoot.querySelectorAll("[data-customer-record-order]").forEach((button) => button.addEventListener("click", async () => {
       await openAdminOrderDetail(button.dataset.customerRecordOrder || null);
     }));
+  };
+
+  contentRoot.querySelectorAll("[data-customer-record]").forEach((button) => button.addEventListener("click", () => {
+    const customerKey = button.dataset.customerRecord || null;
+    const customer = customers.find((record) => record.key === customerKey) || null;
+    adminState.customerList.selectedKey = customerKey;
+    adminState.customerList.mode = "detail";
+    openCustomerDetailDrawer(customer);
+  }));
+
+  if (adminState.customerList.mode === "detail" && selected) {
+    openCustomerDetailDrawer(selected);
   }
 };
 

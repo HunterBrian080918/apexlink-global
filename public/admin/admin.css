@@ -4864,67 +4864,6 @@ textarea {
   text-transform: uppercase;
 }
 
-.admin-order-stage-line {
-  display: flex;
-  align-items: center;
-  width: min(100%, 218px);
-  margin-top: 3px;
-}
-
-.admin-order-stage-line::before {
-  display: none;
-}
-
-.admin-order-stage {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  color: var(--text-faint);
-}
-
-.admin-order-stage:not(:last-child)::after {
-  content: "";
-  width: 12px;
-  height: 1px;
-  margin: 0 5px 0 1px;
-  background: var(--line-strong);
-}
-
-.admin-order-stage i {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
-  border: 1px solid var(--surface);
-  border-radius: 999px;
-  background: var(--line-strong);
-  box-shadow: 0 0 0 1px var(--line-strong);
-}
-
-.admin-order-stage small {
-  font-size: 0.58rem;
-  font-style: normal;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.admin-order-stage.is-complete,
-.admin-order-stage.is-active {
-  color: var(--accent-strong);
-  font-weight: 700;
-}
-
-.admin-order-stage.is-complete i {
-  background: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-
-.admin-order-stage.is-active i {
-  background: var(--surface);
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
 .admin-table-strong {
   font-weight: 700;
 }
@@ -5117,10 +5056,6 @@ textarea {
 
   .admin-order-card-identity {
     grid-column: auto;
-  }
-
-  .admin-order-stage-line {
-    width: min(100%, 240px);
   }
 
   .admin-order-card-action .admin-secondary-button {
@@ -6688,72 +6623,132 @@ textarea {
   transform: none;
 }
 
+.admin-order-group-labels,
+.admin-order-main-card,
 .admin-payment-group-labels,
-.admin-payment-main-card {
-  grid-template-columns:
-    minmax(155px, 1.35fr)
-    minmax(108px, 0.95fr)
-    minmax(112px, 1fr)
-    minmax(92px, 0.78fr)
-    62px
-    minmax(92px, 0.8fr)
-    minmax(82px, 0.72fr)
-    minmax(86px, 0.72fr)
-    58px;
-}
-
-.admin-payment-main-card {
-  min-height: 62px;
-  padding: 9px 11px;
-}
-
-.admin-payment-card-cell {
-  gap: 2px;
-}
-
-.admin-payment-card-cell > strong {
-  font-size: 0.78rem;
-}
-
-.admin-customer-summary-list {
-  display: grid;
-  gap: 6px;
-}
-
+.admin-payment-main-card,
 .admin-customer-summary-labels,
 .admin-customer-summary-card {
   display: grid;
-  grid-template-columns: minmax(180px, 1.5fr) minmax(100px, 0.8fr) 72px minmax(120px, 0.9fr) minmax(104px, 0.85fr) 64px;
+  grid-template-columns: minmax(180px, 1.15fr) minmax(280px, 2fr) minmax(250px, 1.6fr) 72px;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
 }
 
+.admin-order-group-labels,
+.admin-payment-group-labels,
 .admin-customer-summary-labels {
-  padding: 0 12px 2px;
+  padding: 2px 16px 5px;
   color: var(--text-faint);
-  font-size: 0.66rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.015em;
+  text-transform: none;
 }
 
+.admin-order-main-card,
+.admin-payment-main-card,
 .admin-customer-summary-card {
-  min-height: 58px;
-  padding: 9px 12px;
+  min-height: 70px;
+  padding: 12px 16px;
+  font-size: 14px;
 }
 
+.admin-order-card-cell,
+.admin-payment-card-cell,
 .admin-customer-summary-card > div {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.admin-order-card-cell > strong,
+.admin-payment-card-cell > strong,
+.admin-customer-summary-card strong {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-order-main-card small,
+.admin-payment-main-card small,
+.admin-customer-summary-card small,
+.admin-support-shell .admin-thread-row small {
+  color: var(--text-faint);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.admin-data-label {
+  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.admin-data-identity {
+  font-size: 16px !important;
+  font-weight: 750;
+}
+
+.admin-data-key-info {
+  align-content: center;
+}
+
+.admin-data-metric {
+  font-size: 17px !important;
+  font-weight: 760;
+}
+
+.admin-data-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 14px;
+}
+
+.admin-data-meta-row > span {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-data-status-stack {
+  display: flex !important;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 10px !important;
+}
+
+.admin-data-status-stack > div {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.admin-customer-summary-card strong {
-  overflow: hidden;
-  font-size: 0.8rem;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.admin-data-status-stack small {
+  font-size: 13px;
+}
+
+.admin-order-main-card .admin-pill,
+.admin-payment-main-card .admin-pill,
+.admin-customer-summary-card .admin-pill,
+.admin-support-shell .admin-thread-row .admin-pill {
+  min-height: 26px;
+  padding: 5px 9px;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.admin-customer-summary-list {
+  display: grid;
+  gap: 6px;
 }
 
 .admin-summary-card-action {
@@ -6763,7 +6758,7 @@ textarea {
 .admin-summary-mobile-label {
   display: none;
   color: var(--text-faint);
-  font-size: 0.66rem;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -6776,6 +6771,9 @@ textarea {
   border: 0;
   background: rgba(15, 23, 42, 0.34);
   cursor: default;
+  opacity: 1;
+  animation: admin-drawer-backdrop-enter 240ms ease-out;
+  transition: opacity 240ms ease;
 }
 
 .admin-detail-drawer {
@@ -6790,6 +6788,39 @@ textarea {
   border-left: 1px solid var(--line);
   background: var(--bg);
   box-shadow: -24px 0 60px rgba(15, 23, 42, 0.2);
+  transform: translateX(0);
+  animation: admin-detail-drawer-enter 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 240ms cubic-bezier(0.4, 0, 1, 1);
+  will-change: transform;
+}
+
+.admin-detail-drawer.is-closing {
+  animation: none;
+  transform: translateX(100%);
+}
+
+.admin-detail-drawer-backdrop.is-closing {
+  opacity: 0;
+}
+
+@keyframes admin-detail-drawer-enter {
+  from {
+    transform: translateX(100%);
+  }
+
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes admin-drawer-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .admin-detail-drawer-header {
@@ -6968,36 +6999,64 @@ textarea {
 }
 
 .admin-support-shell .admin-thread-row {
-  min-height: 96px;
-  padding: 11px 12px;
+  min-height: 70px;
+  padding: 12px 14px;
+  font-size: 14px;
 }
 
 .admin-support-shell .admin-thread-main {
-  gap: 7px;
+  gap: 5px;
+}
+
+.admin-support-shell .admin-thread-topline strong {
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.admin-support-shell .admin-thread-topline small {
+  font-size: 13px;
 }
 
 .admin-support-shell .admin-thread-preview {
   min-height: 0;
-  -webkit-line-clamp: 2;
+  color: var(--text-soft);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-line-clamp: 1;
+}
+
+.admin-support-shell .admin-thread-bottomline .admin-unread-badge {
+  min-height: 24px;
+  padding: 4px 8px;
+  font-size: 13px;
 }
 
 @media (max-width: 1280px) {
+  .admin-order-main-card,
   .admin-payment-main-card,
   .admin-customer-summary-card {
-    grid-template-columns: repeat(3, minmax(130px, 1fr));
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
     align-items: start;
     row-gap: 12px;
   }
 
+  .admin-order-group-labels,
   .admin-payment-group-labels,
   .admin-customer-summary-labels {
     display: none;
   }
 
+  .admin-order-mobile-label,
+  .admin-payment-mobile-label,
   .admin-summary-mobile-label {
     display: block;
+    color: var(--text-faint);
+    font-size: 13px;
+    font-weight: 750;
   }
 
+  .admin-order-card-action,
+  .admin-payment-card-action,
   .admin-summary-card-action {
     justify-items: start;
   }
@@ -7009,11 +7068,13 @@ textarea {
     min-width: 0;
   }
 
+  .admin-order-main-card,
   .admin-payment-main-card,
   .admin-customer-summary-card {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .admin-order-card-identity,
   .admin-payment-card-identity,
   .admin-customer-summary-card > div:first-child {
     grid-column: 1 / -1;
@@ -7030,12 +7091,14 @@ textarea {
     padding: 10px;
   }
 
+  .admin-order-main-card,
   .admin-payment-main-card,
   .admin-customer-summary-card {
     grid-template-columns: 1fr;
     gap: 10px;
   }
 
+  .admin-order-card-identity,
   .admin-payment-card-identity,
   .admin-customer-summary-card > div:first-child {
     grid-column: auto;
