@@ -35,6 +35,8 @@ const {
   getPaymentByPayPalCaptureId: getSupabasePaymentByPayPalCaptureId,
   createPaymentForOrder: createSupabasePaymentForOrder,
   updatePayment: updateSupabasePayment,
+  reviewBankTransferPayment: reviewSupabaseBankTransferPayment,
+  resolveNextPaymentStage: resolveSupabaseNextPaymentStage,
 } = require("./services/supabase-payments");
 const {
   createConversationWithFirstMessage: createSupabaseSupportConversation,
@@ -91,7 +93,11 @@ const {
   createOrder: createPayPalOrder,
   captureOrder: capturePayPalOrder,
   verifyWebhookSignature: verifyPayPalWebhookSignature,
+  assertCaptureIntegrity: assertPayPalCaptureIntegrity,
 } = require("./services/paypal");
+const {
+  getConfigurationStatus: getCryptoPaymentConfigurationStatus,
+} = require("./services/crypto-payments");
 const { createContactInquiry, validateContactPayload } = require("./services/supabase-contact");
 const { recordVisit: recordSupabaseVisit } = require("./services/supabase-analytics");
 const { buildDashboard: buildSupabaseDashboard } = require("./services/supabase-dashboard");
@@ -106,6 +112,7 @@ const defaultDataFile = path.join(root, "data", "default-data.json");
 const uploadLogFile = path.join(root, "logs", "media-upload.log");
 const adminSessionCookieName = "northstar_admin_session";
 const adminSessionMaxAgeSeconds = 60 * 60 * 24 * 7;
+const orderAccessHeaderName = "x-order-access-token";
 const redirectMap = {
   "/collections": "/products",
   "/collections.html": "/products",
@@ -147,6 +154,90 @@ const getPayPalReturnUrl = (request, orderId, status = "success") => {
   return url.toString();
 };
 
+const getOrderAccessSecret = () => String(process.env.ADMIN_SESSION_SECRET || "").trim();
+const createOrderAccessToken = (order) => {
+  const orderId = String(order?.id || "").trim();
+  const secret = getOrderAccessSecret();
+  if (!orderId || !secret) {
+    throw new Error("Customer order access is not configured.");
+  }
+  return crypto.createHmac("sha256", secret).update(`order:${orderId}`).digest("base64url");
+};
+const readOrderAccessToken = (request) =>
+  String(request?.headers?.[orderAccessHeaderName] || "").trim();
+const hasValidOrderAccessToken = (request, order) => {
+  const provided = readOrderAccessToken(request);
+  if (!provided) {
+    return false;
+  }
+  const expected = createOrderAccessToken(order);
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  return providedBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+};
+const requireCustomerOrderAccess = async (request, response, orderId) => {
+  const order = await getSupabaseOrderById(String(orderId || "").trim());
+  if (!order?.id) {
+    sendJson(response, 404, { error: "Order not found." });
+    return null;
+  }
+  if (!hasValidOrderAccessToken(request, order)) {
+    sendJson(response, 401, { error: "Customer order access token is required." });
+    return null;
+  }
+  return order;
+};
+const toCustomerSafeOrder = (order) => ({
+  id: order.id,
+  orderId: order.orderId,
+  orderNumber: order.orderNumber,
+  orderStatus: order.orderStatus,
+  paymentStatus: order.paymentStatus,
+  purchaseMode: order.purchaseMode,
+  currency: order.currency,
+  paymentTerms: order.paymentTerms,
+  depositPercentage: order.depositPercentage,
+  depositAmount: order.depositAmount,
+  balanceAmount: order.balanceAmount,
+  customerName: order.customerName,
+  email: order.email,
+  phone: order.phone,
+  country: order.country,
+  billingAddress: order.billingAddress,
+  shippingAddress: order.shippingAddress,
+  productId: order.productId,
+  productName: order.productName,
+  quantity: order.quantity,
+  unitPrice: order.unitPrice,
+  subtotal: order.subtotal,
+  discountAmount: order.discountAmount,
+  totalAmount: order.totalAmount,
+  moq: order.moq,
+  budget: order.budget,
+  shippingCycle: order.shippingCycle,
+  leadTime: order.leadTime,
+  message: order.message,
+  createdAt: order.createdAt,
+  items: Array.isArray(order.items) ? order.items : [],
+});
+const toCustomerSafePayment = (payment) => ({
+  id: payment.id,
+  orderId: payment.orderId,
+  paymentType: payment.paymentType,
+  paymentMethod: payment.paymentMethod,
+  paymentProvider: payment.paymentProvider,
+  settlementChannel: payment.settlementChannel,
+  amount: payment.amount,
+  currency: payment.currency,
+  depositAmount: payment.depositAmount,
+  balanceAmount: payment.balanceAmount,
+  status: payment.status,
+  paymentProofUrl: payment.paymentProofUrl,
+  createdAt: payment.createdAt,
+  updatedAt: payment.updatedAt,
+  paidAt: payment.paidAt,
+});
+
 const isPaidStatus = (value) => String(value || "").trim().toLowerCase() === "paid";
 const WORLD_FIRST_SETTLEMENT_CHANNEL = "WorldFirst";
 const normalizePaymentMethodKey = (value) =>
@@ -159,20 +250,28 @@ const isBankTransferMethod = (value) => normalizePaymentMethodKey(value) === "ba
 const getPrimaryRetailPayment = (payments) =>
   (Array.isArray(payments) ? payments : []).find((payment) => payment.paymentType === "full-payment") || null;
 
-const ensureRetailPayPalPayment = async (order) => {
+const ensurePayPalPayment = async (order) => {
   const existingPayments = await listSupabasePaymentsByOrder(order.id);
-  const primaryPayment = getPrimaryRetailPayment(existingPayments);
+  const stage = resolveSupabaseNextPaymentStage(order, existingPayments);
+  if (!stage.paymentType) {
+    throw new Error("All required payments for this order have already been completed.");
+  }
+  const primaryPayment = stage.payment;
 
   if (primaryPayment?.id) {
     if (
       String(primaryPayment.paymentMethod || "").trim() !== "PayPal" ||
-      String(primaryPayment.paymentProvider || "").trim().toLowerCase() !== "paypal"
+      String(primaryPayment.paymentProvider || "").trim().toLowerCase() !== "paypal" ||
+      String(primaryPayment.settlementChannel || "").trim() !== WORLD_FIRST_SETTLEMENT_CHANNEL ||
+      !["pending", "unpaid"].includes(String(primaryPayment.status || "").trim().toLowerCase())
     ) {
       const updatedPayment = await updateSupabasePayment(
         primaryPayment.id,
         {
           paymentMethod: "PayPal",
           paymentProvider: "paypal",
+          settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
+          status: "pending",
         },
         {
           createdBy: "system",
@@ -193,10 +292,13 @@ const ensureRetailPayPalPayment = async (order) => {
   return createSupabasePaymentForOrder(order.id, {
     paymentMethod: "PayPal",
     paymentProvider: "paypal",
-    paymentType: "full-payment",
-    status: "unpaid",
+    settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
+    paymentType: stage.paymentType,
+    status: "pending",
   });
 };
+
+const ensureRetailPayPalPayment = (order) => ensurePayPalPayment(order);
 
 const ensureRetailBankTransferPayment = async (order) => {
   const existingPayments = await listSupabasePaymentsByOrder(order.id);
@@ -258,7 +360,16 @@ const ensureRetailBankTransferPayment = async (order) => {
   };
 };
 
-const finalizePayPalPaymentSuccess = async ({ order, payment, paypalOrderId, paypalCaptureId, paidAt, source }) => {
+const finalizePayPalPaymentSuccess = async ({
+  order,
+  payment,
+  paypalOrderId,
+  paypalCaptureId,
+  capturedAmount,
+  capturedCurrency,
+  paidAt,
+  source,
+}) => {
   if (!order?.id) {
     throw new Error("Order not found for PayPal capture.");
   }
@@ -266,6 +377,13 @@ const finalizePayPalPaymentSuccess = async ({ order, payment, paypalOrderId, pay
   if (!payment?.id) {
     throw new Error("Payment record not found for PayPal capture.");
   }
+
+  assertPayPalCaptureIntegrity({
+    capturedAmount,
+    capturedCurrency,
+    expectedAmount: payment.amount,
+    expectedCurrency: payment.currency,
+  });
 
   if (isPaidStatus(payment.status) && String(payment.paypalCaptureId || "").trim() === String(paypalCaptureId || "").trim()) {
     const refreshedOrder = await getSupabaseOrderById(order.id);
@@ -281,6 +399,7 @@ const finalizePayPalPaymentSuccess = async ({ order, payment, paypalOrderId, pay
     {
       paymentMethod: "PayPal",
       paymentProvider: "paypal",
+      settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
       transactionId: paypalCaptureId,
       paypalOrderId,
       paypalCaptureId,
@@ -294,17 +413,23 @@ const finalizePayPalPaymentSuccess = async ({ order, payment, paypalOrderId, pay
     }
   );
 
-  const updatedOrder = await updateSupabaseOrder(
-    order.id,
-    {
-      paymentMethod: "PayPal",
-      paymentStatus: "paid",
-      orderStatus: "paid",
-    },
-    {
-      createdBy: source || "system",
-    }
-  );
+  let updatedOrder = (await getSupabaseOrderById(order.id)) || order;
+  if (
+    updatedOrder.purchaseMode === "retail" &&
+    updatedOrder.paymentStatus === "paid" &&
+    ["pending_payment", "awaiting_payment", "paid"].includes(updatedOrder.orderStatus)
+  ) {
+    updatedOrder = await updateSupabaseOrder(
+      order.id,
+      {
+        paymentMethod: "PayPal",
+        orderStatus: "processing",
+      },
+      {
+        createdBy: source || "system",
+      }
+    );
+  }
 
   return {
     order: updatedOrder,
@@ -641,7 +766,21 @@ const getRequestOrigin = (request) => {
   return `${protocol}://${host}`;
 };
 
-const buildAbsolutePublicUrl = (request, pathname) => new URL(pathname, `${getRequestOrigin(request)}/`).toString();
+const getSeoCanonicalBaseUrl = (siteConfig, request) => {
+  const configuredBaseUrl = String(siteConfig?.website?.seo?.canonicalBaseUrl || "").trim();
+  try {
+    const parsed = new URL(configuredBaseUrl || getRequestOrigin(request));
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return getRequestOrigin(request);
+    }
+    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+  } catch (error) {
+    return getRequestOrigin(request);
+  }
+};
+
+const buildAbsolutePublicUrl = (request, pathname, baseUrl = "") =>
+  new URL(pathname, `${baseUrl || getRequestOrigin(request)}/`).toString();
 
 const isPublishedProductForSitemap = (product) =>
   sitemapPublishedProductStatuses.has(String(product?.status || "").trim().toLowerCase());
@@ -650,20 +789,21 @@ const getProductDetailPath = (product) => `/detail?id=${encodeURIComponent(Strin
 
 const buildSitemapXml = async (request) => {
   const today = formatSitemapDate();
+  const [siteConfig, products] = await Promise.all([getSupabaseSiteConfig(), listSupabaseProducts()]);
+  const canonicalBaseUrl = getSeoCanonicalBaseUrl(siteConfig, request);
   const staticEntries = sitemapStaticRoutes.map(
     ({ path: routePath, changefreq, priority }) => `  <url>
-    <loc>${escapeXml(buildAbsolutePublicUrl(request, routePath))}</loc>
+    <loc>${escapeXml(buildAbsolutePublicUrl(request, routePath, canonicalBaseUrl))}</loc>
     <lastmod>${today}</lastmod>
     <changefreq>${changefreq}</changefreq>
     <priority>${priority}</priority>
   </url>`
   );
 
-  const products = await listSupabaseProducts();
   const productEntries = products
     .filter((product) => isPublishedProductForSitemap(product) && String(product?.id || "").trim())
     .map((product) => `  <url>
-    <loc>${escapeXml(buildAbsolutePublicUrl(request, getProductDetailPath(product)))}</loc>
+    <loc>${escapeXml(buildAbsolutePublicUrl(request, getProductDetailPath(product), canonicalBaseUrl))}</loc>
     <lastmod>${formatSitemapDate(product.updatedAt || product.createdAt)}</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
@@ -685,8 +825,18 @@ const sendSitemapXml = async (request, response) => {
   }
 };
 
-const sendRobotsTxt = (request, response) => {
-  const body = `User-agent: *
+const sendRobotsTxt = async (request, response) => {
+  try {
+    const siteConfig = await getSupabaseSiteConfig();
+    const seo = siteConfig?.website?.seo || {};
+    const canonicalBaseUrl = getSeoCanonicalBaseUrl(siteConfig, request);
+    const body = seo.allowIndexing === false
+      ? `User-agent: *
+Disallow: /
+
+Sitemap: ${buildAbsolutePublicUrl(request, "/sitemap.xml", canonicalBaseUrl)}
+`
+      : `User-agent: *
 Allow: /
 
 Disallow: /admin
@@ -694,9 +844,13 @@ Disallow: /api
 Disallow: /data
 Disallow: /scripts
 
-Sitemap: ${buildAbsolutePublicUrl(request, "/sitemap.xml")}
+Sitemap: ${buildAbsolutePublicUrl(request, "/sitemap.xml", canonicalBaseUrl)}
 `;
-  send(response, 200, body, "text/plain; charset=utf-8");
+    send(response, 200, body, "text/plain; charset=utf-8");
+  } catch (error) {
+    console.error("[seo] robots generation failed:", error);
+    send(response, 500, "Unable to generate robots.txt", "text/plain; charset=utf-8");
+  }
 };
 
 const reportStartupEnvWarnings = () => {
@@ -1457,6 +1611,14 @@ const parseNestedOrderIdFromPath = (pathname, suffix) => {
 
   return decodeURIComponent(pathname.slice(prefix.length, pathname.length - suffix.length)).trim();
 };
+const parseNestedCustomerOrderIdFromPath = (pathname, suffix = "") => {
+  const prefix = "/api/customer/orders/";
+  if (!pathname.startsWith(prefix) || (suffix && !pathname.endsWith(suffix))) {
+    return "";
+  }
+  const endIndex = suffix ? pathname.length - suffix.length : pathname.length;
+  return decodeURIComponent(pathname.slice(prefix.length, endIndex)).trim();
+};
 const parsePaymentIdFromPath = (pathname, prefix) => decodeURIComponent(pathname.slice(prefix.length)).trim();
 const parseSupportConversationIdFromPath = (pathname, prefix) => decodeURIComponent(pathname.slice(prefix.length)).trim();
 const parseNestedSupportConversationIdFromPath = (pathname, suffix) => {
@@ -1582,7 +1744,12 @@ const sendOrderList = async (request, response) => {
   return true;
 };
 
-const sendOrderDetail = async (response, orderId) => {
+const sendOrderDetail = async (request, response, orderId) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) {
+    return true;
+  }
+
   try {
     const order = await getSupabaseOrderById(orderId);
 
@@ -1604,7 +1771,28 @@ const sendOrderDetail = async (response, orderId) => {
   return true;
 };
 
-const sendOrderByNumber = async (response, orderNumber) => {
+const sendCustomerOrderDetail = async (request, response, orderId) => {
+  try {
+    const order = await requireCustomerOrderAccess(request, response, orderId);
+    if (!order) {
+      return true;
+    }
+    sendJson(response, 200, { order: toCustomerSafeOrder(order) });
+  } catch (error) {
+    console.error("[orders] customer detail failed:", error);
+    sendJson(response, error?.status || 500, {
+      error: error?.message || "Unable to load order.",
+    });
+  }
+  return true;
+};
+
+const sendOrderByNumber = async (request, response, orderNumber) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) {
+    return true;
+  }
+
   try {
     const order = await getSupabaseOrderByNumber(orderNumber);
 
@@ -1628,6 +1816,11 @@ const sendOrderByNumber = async (response, orderNumber) => {
 
 const handleOrderCreate = async (request, response) => {
   try {
+    if (!getOrderAccessSecret()) {
+      const configurationError = new Error("Customer order access is not configured.");
+      configurationError.status = 503;
+      throw configurationError;
+    }
     const body = await readJsonBody(request);
     const orderInput = body?.order && typeof body.order === "object" ? body.order : body;
     let order = await createSupabaseOrder(orderInput);
@@ -1678,14 +1871,17 @@ const handleOrderCreate = async (request, response) => {
       adminUrl: adminLink,
     });
 
+    const orderAccessToken = createOrderAccessToken(order);
+
     sendJson(response, 201, {
       ok: true,
       order,
       payment: createdPayment,
+      orderAccessToken,
     });
   } catch (error) {
     console.error("[orders] create failed:", error);
-    sendJson(response, 400, {
+    sendJson(response, error?.status || 400, {
       error: error?.message || "Unable to create order.",
     });
   }
@@ -1693,14 +1889,26 @@ const handleOrderCreate = async (request, response) => {
   return true;
 };
 
-const handleBankTransferProofUpload = async (request, response, orderId) => {
+const handleBankTransferProofUpload = async (request, response, orderId, options = {}) => {
+  if (!options.customerAccess) {
+    const auth = await requireAuthenticatedAdmin(request, response);
+    if (!auth) {
+      return true;
+    }
+  }
+
   try {
     const normalizedOrderId = String(orderId || "").trim();
     if (!normalizedOrderId) {
       throw new Error("Order id is required.");
     }
 
-    const order = await getSupabaseOrderById(normalizedOrderId);
+    const order = options.customerAccess
+      ? await requireCustomerOrderAccess(request, response, normalizedOrderId)
+      : await getSupabaseOrderById(normalizedOrderId);
+    if (options.customerAccess && !order) {
+      return true;
+    }
     if (!order?.id) {
       sendJson(response, 404, {
         error: "Order not found.",
@@ -1745,8 +1953,8 @@ const handleBankTransferProofUpload = async (request, response, orderId) => {
       payment.id,
       {
         paymentMethod: "Bank Transfer",
-        paymentProvider: "bank_transfer",
-        settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
+        paymentProvider: String(payment.paymentProvider || "").trim() || "bank_transfer",
+        settlementChannel: String(payment.settlementChannel || "").trim() || null,
         transactionId: transactionReference,
         paymentProofUrl: asset?.secureUrl || asset?.url || payment.paymentProofUrl || "",
         status: "payment_submitted",
@@ -1867,7 +2075,12 @@ const handleOrderDelete = async (request, response, orderId) => {
   return true;
 };
 
-const sendOrderPayments = async (response, orderId) => {
+const sendOrderPayments = async (request, response, orderId) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) {
+    return true;
+  }
+
   try {
     const payments = await listSupabasePaymentsByOrder(orderId);
     sendJson(response, 200, { payments });
@@ -1881,37 +2094,81 @@ const sendOrderPayments = async (response, orderId) => {
   return true;
 };
 
-const handleOrderPaymentCreate = async (request, response, orderId) => {
+const sendCustomerOrderPayments = async (request, response, orderId) => {
+  try {
+    const order = await requireCustomerOrderAccess(request, response, orderId);
+    if (!order) {
+      return true;
+    }
+    const payments = await listSupabasePaymentsByOrder(order.id);
+    sendJson(response, 200, { payments: payments.map(toCustomerSafePayment) });
+  } catch (error) {
+    console.error("[payments] customer order payments load failed:", error);
+    sendJson(response, error?.status || 500, {
+      error: error?.message || "Unable to load payments.",
+    });
+  }
+  return true;
+};
+
+const handleOrderPaymentCreate = async (request, response, orderId, options = {}) => {
+  if (options.customerAccess) {
+    const order = await requireCustomerOrderAccess(request, response, orderId);
+    if (!order) {
+      return true;
+    }
+  } else {
+    const auth = await requireAuthenticatedAdmin(request, response);
+    if (!auth) {
+      return true;
+    }
+  }
+
   try {
     const body = await readJsonBody(request);
-    const paymentInput = body?.payment && typeof body.payment === "object" ? body.payment : body;
+    const rawPaymentInput = body?.payment && typeof body.payment === "object" ? body.payment : body;
+    const paymentInput = options.customerAccess
+      ? {
+          ...rawPaymentInput,
+          paymentMethod: "Bank Transfer",
+          paymentProvider: "bank_transfer",
+          settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
+          status: "pending",
+        }
+      : rawPaymentInput;
+    if (options.customerAccess && !isBankTransferMethod(rawPaymentInput?.paymentMethod)) {
+      throw new Error("Online PayPal payments must use the PayPal checkout endpoint.");
+    }
     const payload = await createSupabasePaymentForOrder(orderId, paymentInput);
-    const adminLink = buildAdminDeepLink("order", payload.order?.id || orderId);
-    notifyAdmin({
-      type: "new_payment",
-      title: "New payment received",
-      message: `${payload.payment?.currency || "USD"} ${payload.payment?.amount || 0} for ${payload.order?.orderNumber || payload.order?.orderId || orderId}`,
-      entityType: "payment",
-      entityId: payload.payment?.id,
-      metadata: buildNotificationMetadata({
-        customerName: payload.order?.customerName,
-        email: payload.order?.email,
-        timestamp: payload.payment?.createdAt || nowIso(),
-        adminLink,
-        orderNumber: payload.order?.orderNumber || payload.order?.orderId || "",
-        purchaseMode: payload.order?.purchaseMode,
-        metadata: {
-          orderId,
-          amount: payload.payment?.amount || 0,
-          currency: payload.payment?.currency || "USD",
-          paymentMethod: payload.payment?.paymentMethod || "",
-        },
-      }),
-    });
-    sendJson(response, 201, {
+    if (!payload.idempotent) {
+      const adminLink = buildAdminDeepLink("order", payload.order?.id || orderId);
+      notifyAdmin({
+        type: "new_payment",
+        title: "New payment received",
+        message: `${payload.payment?.currency || "USD"} ${payload.payment?.amount || 0} for ${payload.order?.orderNumber || payload.order?.orderId || orderId}`,
+        entityType: "payment",
+        entityId: payload.payment?.id,
+        metadata: buildNotificationMetadata({
+          customerName: payload.order?.customerName,
+          email: payload.order?.email,
+          timestamp: payload.payment?.createdAt || nowIso(),
+          adminLink,
+          orderNumber: payload.order?.orderNumber || payload.order?.orderId || "",
+          purchaseMode: payload.order?.purchaseMode,
+          metadata: {
+            orderId,
+            amount: payload.payment?.amount || 0,
+            currency: payload.payment?.currency || "USD",
+            paymentMethod: payload.payment?.paymentMethod || "",
+          },
+        }),
+      });
+    }
+    sendJson(response, payload.idempotent ? 200 : 201, {
       ok: true,
-      payment: payload.payment,
-      order: payload.order,
+      idempotent: Boolean(payload.idempotent),
+      payment: options.customerAccess ? toCustomerSafePayment(payload.payment) : payload.payment,
+      order: options.customerAccess ? toCustomerSafeOrder(payload.order) : payload.order,
     });
   } catch (error) {
     console.error("[payments] create failed:", error);
@@ -2040,6 +2297,33 @@ const handlePaymentUpdate = async (request, response, paymentId) => {
   return true;
 };
 
+const handleBankTransferPaymentReview = async (request, response, paymentId) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) {
+    return true;
+  }
+
+  try {
+    const body = await readJsonBody(request);
+    const result = await reviewSupabaseBankTransferPayment(paymentId, body?.status, {
+      createdBy: auth.session.email || "admin",
+    });
+    sendJson(response, 200, {
+      ok: true,
+      idempotent: result.idempotent,
+      payment: result.payment,
+      order: result.order,
+    });
+  } catch (error) {
+    console.error("[payments] bank transfer review failed:", error);
+    sendJson(response, error?.status || 400, {
+      error: error?.message || "Unable to review bank transfer payment.",
+    });
+  }
+
+  return true;
+};
+
 const handlePayPalOrderCreate = async (request, response) => {
   try {
     const body = await readJsonBody(request);
@@ -2054,26 +2338,34 @@ const handlePayPalOrderCreate = async (request, response) => {
       return true;
     }
 
-    if (String(order.purchaseMode || "").trim().toLowerCase() !== "retail") {
-      throw new Error("PayPal Checkout is available for retail orders only.");
+    if (!hasValidOrderAccessToken(request, order)) {
+      sendJson(response, 401, { error: "Customer order access token is required." });
+      return true;
     }
 
-    if (isPaidStatus(order.paymentStatus) || isPaidStatus(order.orderStatus)) {
+    if (isPaidStatus(order.paymentStatus)) {
       throw new Error("This order has already been paid.");
     }
 
-    const paymentPayload = await ensureRetailPayPalPayment(order);
+    if (["cancelled", "completed"].includes(String(order.orderStatus || "").trim().toLowerCase())) {
+      throw new Error("PayPal checkout is not available for this order status.");
+    }
+
+    const paymentPayload = await ensurePayPalPayment(order);
     const payment = paymentPayload.payment;
     const amount = Number(String(payment?.amount || 0).replace(/[^\d.-]/g, "") || 0);
 
-    if (String(order.orderStatus || "").trim().toLowerCase() !== "pending_payment") {
+    if (
+      String(order.purchaseMode || "").trim().toLowerCase() === "retail" &&
+      !["pending_payment", "awaiting_payment"].includes(String(order.orderStatus || "").trim().toLowerCase())
+    ) {
       throw new Error("PayPal checkout is only available while the order is pending payment.");
     }
 
     const paypalOrder = await createPayPalOrder({
       amount,
       currency: payment?.currency || order.currency || "USD",
-      description: `${order.productName || "AvelixLink order"} (${order.orderNumber || order.orderId || order.id})`,
+      description: `${payment?.paymentType || "payment"}: ${order.productName || "AvelixLink order"} (${order.orderNumber || order.orderId || order.id})`,
       referenceId: payment?.id || order.id,
       customId: order.id,
       invoiceId: order.orderNumber || order.orderId || order.id,
@@ -2090,17 +2382,20 @@ const handlePayPalOrderCreate = async (request, response) => {
       {
         paymentMethod: "PayPal",
         paymentProvider: "paypal",
+        settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
         paypalOrderId: paypalOrder.id,
+        status: "pending",
       },
       {
         createdBy: "system",
       }
     );
+    const updatedOrder = (await getSupabaseOrderById(order.id)) || order;
 
     sendJson(response, 201, {
       ok: true,
-      order,
-      payment: updatedPayment,
+      order: toCustomerSafeOrder(updatedOrder),
+      payment: toCustomerSafePayment(updatedPayment),
       paypalOrderId: paypalOrder.id,
       approval_url: paypalOrder.approvalUrl,
       approvalUrl: paypalOrder.approvalUrl,
@@ -2131,9 +2426,17 @@ const handlePayPalCapture = async (request, response) => {
       return true;
     }
 
+    if (!hasValidOrderAccessToken(request, order)) {
+      sendJson(response, 401, { error: "Customer order access token is required." });
+      return true;
+    }
+
     let payment = await getSupabasePaymentByPayPalOrderId(paypalOrderId);
+    if (payment?.id && String(payment.orderId || "").trim() !== String(order.id || "").trim()) {
+      throw new Error("PayPal payment does not belong to this order.");
+    }
     if (!payment?.id) {
-      const paymentPayload = await ensureRetailPayPalPayment(order);
+      const paymentPayload = await ensurePayPalPayment(order);
       payment = paymentPayload.payment;
       if (payment?.id && String(payment.paypalOrderId || "").trim() !== paypalOrderId) {
         payment = await updateSupabasePayment(
@@ -2153,8 +2456,8 @@ const handlePayPalCapture = async (request, response) => {
     if (isPaidStatus(payment?.status)) {
       sendJson(response, 200, {
         ok: true,
-        order,
-        payment,
+        order: toCustomerSafeOrder(order),
+        payment: toCustomerSafePayment(payment),
         alreadyPaid: true,
       });
       return true;
@@ -2170,14 +2473,16 @@ const handlePayPalCapture = async (request, response) => {
       payment,
       paypalOrderId,
       paypalCaptureId: capture.captureId,
+      capturedAmount: capture.capturedAmount,
+      capturedCurrency: capture.capturedCurrency,
       paidAt: capture.paidAt,
       source: "system",
     });
 
     sendJson(response, 200, {
       ok: true,
-      order: finalized.order,
-      payment: finalized.payment,
+      order: toCustomerSafeOrder(finalized.order),
+      payment: toCustomerSafePayment(finalized.payment),
       alreadyPaid: finalized.alreadyPaid,
     });
   } catch (error) {
@@ -2255,14 +2560,14 @@ const handlePayPalWebhook = async (request, response) => {
       payment,
       paypalOrderId: paypalOrderId || payment.paypalOrderId,
       paypalCaptureId,
+      capturedAmount: resource?.amount?.value,
+      capturedCurrency: resource?.amount?.currency_code,
       paidAt: String(resource?.create_time || resource?.update_time || "").trim(),
       source: "paypal_webhook",
     });
 
     sendJson(response, 200, {
       ok: true,
-      order: finalized.order,
-      payment: finalized.payment,
       alreadyPaid: finalized.alreadyPaid,
     });
   } catch (error) {
@@ -2953,6 +3258,14 @@ const handleAdminApi = async (request, response, requestUrl) => {
     return sendPublicSiteConfig(response);
   }
 
+  if (requestUrl.pathname === "/api/crypto/config" && request.method === "GET") {
+    sendJson(response, 200, {
+      ok: true,
+      crypto: getCryptoPaymentConfigurationStatus(),
+    });
+    return true;
+  }
+
   if (requestUrl.pathname.startsWith("/api/support/conversations/") && requestUrl.pathname.endsWith("/stream") && request.method === "GET") {
     return handleSupportConversationStream(
       request,
@@ -3086,14 +3399,45 @@ const handleAdminApi = async (request, response, requestUrl) => {
     return handlePayPalWebhook(request, response);
   }
 
+  if (requestUrl.pathname.startsWith("/api/customer/orders/") && requestUrl.pathname.endsWith("/payments")) {
+    const orderId = parseNestedCustomerOrderIdFromPath(requestUrl.pathname, "/payments");
+    if (request.method === "GET") {
+      return sendCustomerOrderPayments(request, response, orderId);
+    }
+    if (request.method === "POST") {
+      return handleOrderPaymentCreate(request, response, orderId, { customerAccess: true });
+    }
+  }
+
+  if (
+    requestUrl.pathname.startsWith("/api/customer/orders/") &&
+    requestUrl.pathname.endsWith("/bank-transfer-proof") &&
+    request.method === "POST"
+  ) {
+    return handleBankTransferProofUpload(
+      request,
+      response,
+      parseNestedCustomerOrderIdFromPath(requestUrl.pathname, "/bank-transfer-proof"),
+      { customerAccess: true }
+    );
+  }
+
+  if (requestUrl.pathname.startsWith("/api/customer/orders/") && request.method === "GET") {
+    return sendCustomerOrderDetail(
+      request,
+      response,
+      parseNestedCustomerOrderIdFromPath(requestUrl.pathname)
+    );
+  }
+
   if (requestUrl.pathname.startsWith("/api/orders/by-number/") && request.method === "GET") {
-    return sendOrderByNumber(response, parseOrderIdFromPath(requestUrl.pathname, "/api/orders/by-number/"));
+    return sendOrderByNumber(request, response, parseOrderIdFromPath(requestUrl.pathname, "/api/orders/by-number/"));
   }
 
   if (requestUrl.pathname.startsWith("/api/orders/") && requestUrl.pathname.endsWith("/payments")) {
     const orderId = parseNestedOrderIdFromPath(requestUrl.pathname, "/payments");
     if (request.method === "GET") {
-      return sendOrderPayments(response, orderId);
+      return sendOrderPayments(request, response, orderId);
     }
     if (request.method === "POST") {
       return handleOrderPaymentCreate(request, response, orderId);
@@ -3146,7 +3490,7 @@ const handleAdminApi = async (request, response, requestUrl) => {
   }
 
   if (requestUrl.pathname.startsWith("/api/orders/") && request.method === "GET") {
-    return sendOrderDetail(response, parseOrderIdFromPath(requestUrl.pathname, "/api/orders/"));
+    return sendOrderDetail(request, response, parseOrderIdFromPath(requestUrl.pathname, "/api/orders/"));
   }
 
   if (requestUrl.pathname.startsWith("/api/orders/") && request.method === "PATCH") {
@@ -3159,6 +3503,17 @@ const handleAdminApi = async (request, response, requestUrl) => {
 
   if (requestUrl.pathname.startsWith("/api/payments/") && request.method === "GET") {
     return sendPaymentDetail(request, response, parsePaymentIdFromPath(requestUrl.pathname, "/api/payments/"));
+  }
+
+  if (
+    requestUrl.pathname.startsWith("/api/payments/") &&
+    requestUrl.pathname.endsWith("/review-bank-transfer") &&
+    request.method === "POST"
+  ) {
+    const paymentId = decodeURIComponent(
+      requestUrl.pathname.slice("/api/payments/".length, -"/review-bank-transfer".length)
+    ).trim();
+    return handleBankTransferPaymentReview(request, response, paymentId);
   }
 
   if (requestUrl.pathname.startsWith("/api/payments/") && request.method === "PATCH") {
@@ -3501,7 +3856,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (requestUrl.pathname === "/robots.txt" && request.method === "GET") {
-      sendRobotsTxt(request, response);
+      await sendRobotsTxt(request, response);
       return;
     }
 

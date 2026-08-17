@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
   <meta
     name="description"
     content="Product checkout and order request page for premium workspace customers."
@@ -78,6 +79,8 @@
               <input id="quantity-input" type="number" name="quantity" step="1" required>
             </label>
             <p class="checkout-quantity-note" id="checkout-quantity-note" aria-live="polite"></p>
+
+            <div class="form-grid" id="checkout-currency" hidden></div>
 
             <label>
               Notes

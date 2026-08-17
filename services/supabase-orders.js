@@ -3,7 +3,7 @@ const SUPABASE_ADMIN_KEY = String(
   process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 ).trim();
 
-const ORDER_CREATE_TIMING_LOG = true;
+const ORDER_CREATE_TIMING_LOG = false;
 const SUPPORT_RETRY_COOLDOWN_MS = 5000;
 const createSupportState = () => ({
   supported: null,
@@ -18,6 +18,7 @@ const shippingStatusSupportState = createSupportState();
 const ORDER_REQUIRED_SELECT = ["*"];
 
 const ORDER_ITEM_REQUIRED_SELECT = ["*"];
+const SUPPORTED_ORDER_CURRENCIES = new Set(["USD", "HKD"]);
 
 const requireConfig = () => {
   if (!SUPABASE_URL || !SUPABASE_ADMIN_KEY) {
@@ -74,8 +75,44 @@ const requestSupabase = async (tablePath, options = {}) => {
 
 const escapeFilterValue = (value) => encodeURIComponent(String(value || "").trim());
 const asObject = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
+const isMissingColumnError = (error, columnName) => {
+  const message = String(error?.message || error || "");
+  if (message.includes(`column ${columnName} does not exist`)) {
+    return true;
+  }
+  const [tableName, bareColumnName] = String(columnName || "").split(".");
+  return Boolean(
+    tableName &&
+      bareColumnName &&
+      message.includes(`Could not find the '${bareColumnName}' column of '${tableName}' in the schema cache`)
+  );
+};
+const omitKeys = (value, keys = []) => {
+  const nextValue = { ...asObject(value) };
+  keys.forEach((key) => {
+    delete nextValue[key];
+  });
+  return nextValue;
+};
 
-const formatCurrency = (value) => `$${Number(value || 0).toFixed(2)}`;
+const formatCurrency = (value, currency = "USD") => {
+  const amount = Number(value || 0);
+  const normalizedCurrency = String(currency || "USD").trim().toUpperCase() || "USD";
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: normalizedCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch (error) {
+    return `${normalizedCurrency} ${amount.toFixed(2)}`;
+  }
+};
+const normalizeOrderCurrency = (value) => {
+  const normalized = String(value || "USD").trim().toUpperCase();
+  return SUPPORTED_ORDER_CURRENCIES.has(normalized) ? normalized : "USD";
+};
 
 const formatShippingTime = (value) => {
   const days = Number.parseInt(String(value ?? ""), 10);
@@ -103,9 +140,11 @@ const WHOLESALE_ORDER_STATUSES = new Set([
   "quote_pending",
   "awaiting_confirmation",
   "awaiting_deposit",
+  "deposit_paid",
   "in_production",
   "quality_inspection",
   "awaiting_balance",
+  "balance_paid",
   "ready_to_ship",
   "shipped",
   "delivered",
@@ -134,41 +173,56 @@ const SHIPPING_STATUSES = new Set([
 ]);
 const INTERNAL_ORDER_STATUSES = new Set(["unprocessed", "processed"]);
 
-const formatDepositValue = (deposit) => {
+const formatDepositValue = (deposit, currency = "USD") => {
   const amount = Number(deposit?.value || 0);
   if (!Number.isFinite(amount) || amount <= 0) {
     return "";
   }
 
   if (deposit?.type === "fixed") {
-    return formatCurrency(amount);
+    return formatCurrency(amount, currency);
   }
 
   return Number.isInteger(amount) ? `${amount}%` : `${amount.toFixed(2)}%`;
 };
 
-const getWholesalePriceTiers = (product) =>
+const getWholesalePriceTiers = (product, currency = "USD") =>
   Array.isArray(product?.b2b?.priceTiers)
     ? product.b2b.priceTiers
+        .filter((tier) => normalizeOrderCurrency(tier?.currency || "USD") === normalizeOrderCurrency(currency))
         .filter((tier) => Number(tier?.unitPrice || 0) > 0)
         .slice()
         .sort((left, right) => Number(left?.minQuantity || 0) - Number(right?.minQuantity || 0))
     : [];
 
-const getWholesaleTierForQuantity = (product, quantity) => {
-  const tiers = getWholesalePriceTiers(product);
-  if (!tiers.length) {
+const resolveWholesaleTier = (tiers, quantity) => {
+  const normalizedTiers = Array.isArray(tiers)
+    ? tiers
+        .filter((tier) => Number(tier?.unitPrice || 0) > 0)
+        .slice()
+        .sort((left, right) => Number(left?.minQuantity || 0) - Number(right?.minQuantity || 0))
+    : [];
+
+  if (!normalizedTiers.length) {
     return null;
   }
 
   const nextQuantity = Math.max(1, Number(quantity || 1));
   return (
-    tiers.find((tier) => {
+    normalizedTiers.find((tier) => {
       const min = Math.max(1, Number(tier.minQuantity || 1));
       const max = Math.max(0, Number(tier.maxQuantity || 0));
       return nextQuantity >= min && (max === 0 || nextQuantity <= max);
-    }) || tiers[tiers.length - 1]
+    }) || null
   );
+};
+
+const getWholesaleTierForQuantity = (product, quantity, currency = "USD") => {
+  const tiers = getWholesalePriceTiers(product, currency);
+  if (!tiers.length) {
+    return null;
+  }
+  return resolveWholesaleTier(tiers, quantity);
 };
 
 const nowIso = () => new Date().toISOString();
@@ -242,9 +296,19 @@ const selectLeanProduct = async (productId) => {
     return null;
   }
 
-  const tierRows = await requestSupabase(
-    `product_price_tiers?select=id,min_quantity,max_quantity,unit_price,sort_order&product_id=eq.${escapeFilterValue(productId)}&order=sort_order.asc`
-  );
+  let tierRows;
+  try {
+    tierRows = await requestSupabase(
+      `product_price_tiers?select=id,currency,min_quantity,max_quantity,unit_price,sort_order&product_id=eq.${escapeFilterValue(productId)}&order=sort_order.asc`
+    );
+  } catch (error) {
+    if (!isMissingColumnError(error, "product_price_tiers.currency")) {
+      throw error;
+    }
+    tierRows = await requestSupabase(
+      `product_price_tiers?select=id,min_quantity,max_quantity,unit_price,sort_order&product_id=eq.${escapeFilterValue(productId)}&order=sort_order.asc`
+    );
+  }
 
   return {
     id: String(productRow.id || ""),
@@ -268,6 +332,7 @@ const selectLeanProduct = async (productId) => {
       },
       priceTiers: (Array.isArray(tierRows) ? tierRows : []).map((tier) => ({
         id: String(tier.id || ""),
+        currency: normalizeOrderCurrency(tier.currency || "USD"),
         minQuantity: Number(tier.min_quantity || 1),
         maxQuantity: tier.max_quantity === null || tier.max_quantity === undefined ? 0 : Number(tier.max_quantity || 0),
         unitPrice: Number(tier.unit_price || 0),
@@ -278,6 +343,7 @@ const selectLeanProduct = async (productId) => {
 
 const mapOrderRow = (row, itemRows = []) => {
   const orderNumber = String(row.order_number || row.order_id || row.id || "").trim();
+  const orderCurrency = normalizeOrderCurrency(row.currency || "USD");
   const shippingAmount = Number(row.shipping_amount || 0);
   const taxAmount = Number(row.tax_amount || 0);
   const discountAmount = Number(row.discount_amount || 0);
@@ -287,20 +353,20 @@ const mapOrderRow = (row, itemRows = []) => {
     row.deposit_percentage !== undefined && row.deposit_percentage !== null
       ? String(row.deposit_percentage || "").trim()
       : "";
+  const totalAmount =
+    row.total_amount !== undefined && row.total_amount !== null
+      ? Number(row.total_amount || 0)
+      : Math.max(0, subtotalValue - discountAmount);
   const computedDepositAmount =
     row.deposit_amount !== undefined && row.deposit_amount !== null
       ? Number(row.deposit_amount || 0)
       : purchaseMode === "wholesale" && fallbackDepositPercentage
-        ? subtotalValue * ((Number(String(fallbackDepositPercentage).replace(/[^\d.-]/g, "")) || 0) / 100)
+        ? totalAmount * ((Number(String(fallbackDepositPercentage).replace(/[^\d.-]/g, "")) || 0) / 100)
         : 0;
   const computedBalanceAmount =
     row.balance_amount !== undefined && row.balance_amount !== null
       ? Number(row.balance_amount || 0)
-      : Math.max(0, subtotalValue - computedDepositAmount);
-  const totalAmount =
-    row.total_amount !== undefined && row.total_amount !== null
-      ? Number(row.total_amount || 0)
-      : Math.max(0, subtotalValue + shippingAmount + taxAmount - discountAmount);
+      : Math.max(0, totalAmount - computedDepositAmount);
 
   return {
     id: String(row.id || ""),
@@ -313,11 +379,11 @@ const mapOrderRow = (row, itemRows = []) => {
     paymentStatus: String(row.payment_status || "unpaid"),
     shippingStatus: String(row.shipping_status || "not_started"),
     purchaseMode,
-    currency: String(row.currency || "USD"),
+    currency: orderCurrency,
     paymentTerms: String(row.payment_terms || row.b2b_deposit_terms || ""),
     depositPercentage: fallbackDepositPercentage,
-    depositAmount: computedDepositAmount > 0 ? formatCurrency(computedDepositAmount) : "",
-    balanceAmount: computedBalanceAmount > 0 ? formatCurrency(computedBalanceAmount) : "",
+    depositAmount: computedDepositAmount > 0 ? formatCurrency(computedDepositAmount, orderCurrency) : "",
+    balanceAmount: computedBalanceAmount > 0 ? formatCurrency(computedBalanceAmount, orderCurrency) : "",
     customerId: String(row.customer_id || ""),
     customerName: String(row.customer_name || ""),
     email: String(row.customer_email || row.email || ""),
@@ -328,14 +394,14 @@ const mapOrderRow = (row, itemRows = []) => {
     productId: String(row.product_id || row.product_id_snapshot || ""),
     productName: String(row.product_name || row.product_name_snapshot || ""),
     quantity: String(row.quantity || 1),
-    unitPrice: formatCurrency(row.unit_price || 0),
-    subtotal: formatCurrency(row.subtotal || 0),
-    shippingAmount: formatCurrency(shippingAmount),
-    taxAmount: formatCurrency(taxAmount),
-    discountAmount: formatCurrency(discountAmount),
-    totalAmount: formatCurrency(totalAmount),
+    unitPrice: formatCurrency(row.unit_price || 0, orderCurrency),
+    subtotal: formatCurrency(row.subtotal || 0, orderCurrency),
+    shippingAmount: formatCurrency(shippingAmount, orderCurrency),
+    taxAmount: formatCurrency(taxAmount, orderCurrency),
+    discountAmount: formatCurrency(discountAmount, orderCurrency),
+    totalAmount: formatCurrency(totalAmount, orderCurrency),
     moq: String(row.moq || ""),
-    budget: String(row.budget || formatCurrency(row.subtotal || 0)),
+    budget: String(row.budget || formatCurrency(totalAmount, orderCurrency)),
     shippingCycle: String(row.shipping_cycle || row.lead_time || ""),
     leadTime: String(row.lead_time || row.shipping_cycle || ""),
     message: String(row.message || ""),
@@ -355,8 +421,8 @@ const mapOrderRow = (row, itemRows = []) => {
       sku: String(item.sku_snapshot || ""),
       productImage: String(item.product_image_snapshot || ""),
       quantity: String(item.quantity || 1),
-      unitPrice: formatCurrency(item.unit_price || 0),
-      lineTotal: formatCurrency(item.line_total !== undefined ? item.line_total : item.subtotal || 0),
+      unitPrice: formatCurrency(item.unit_price || 0, orderCurrency),
+      lineTotal: formatCurrency(item.line_total !== undefined ? item.line_total : item.subtotal || 0, orderCurrency),
       purchaseMode: String(item.purchase_mode || ""),
       selectedPriceTierSnapshot: item.selected_price_tier_snapshot || null,
       productOptionsSnapshot: item.product_options_snapshot || null,
@@ -706,6 +772,8 @@ const createOrder = async (input) => {
   };
   const payload = asObject(input);
   const purchaseMode = String(payload.purchaseMode || "retail").trim().toLowerCase() === "wholesale" ? "wholesale" : "retail";
+  const requestedCurrency = normalizeOrderCurrency(payload.currency || "USD");
+  const orderCurrency = purchaseMode === "wholesale" ? requestedCurrency : "USD";
   const quantity = Math.max(1, Number.parseInt(String(payload.quantity || "1"), 10) || 1);
   const productId = String(payload.productId || "").trim();
 
@@ -730,11 +798,17 @@ const createOrder = async (input) => {
   if (!product?.id) {
     throw new Error("The selected product could not be found.");
   }
-  const wholesaleTier = purchaseMode === "wholesale" ? getWholesaleTierForQuantity(product, quantity) : null;
+  const wholesaleTier = purchaseMode === "wholesale" ? getWholesaleTierForQuantity(product, quantity, orderCurrency) : null;
   const wholesaleMoq = Math.max(1, Number(product?.b2b?.wholesaleMoq || product?.moqValue || 1));
 
   if (purchaseMode === "wholesale" && quantity < wholesaleMoq) {
     throw new Error(`Wholesale quantity must be at least ${wholesaleMoq} units.`);
+  }
+
+  if (purchaseMode === "wholesale" && !wholesaleTier) {
+    throw new Error(
+      `No wholesale pricing tier matches quantity ${quantity} in ${orderCurrency}. Please request a quote.`
+    );
   }
 
   const unitPriceValue =
@@ -742,15 +816,16 @@ const createOrder = async (input) => {
       ? Number(wholesaleTier?.unitPrice || 0)
       : Number(product?.b2c?.retailPrice || 0);
   const subtotalValue = unitPriceValue * quantity;
-  const depositPercentage = purchaseMode === "wholesale" ? formatDepositValue(product?.b2b?.deposit || {}) : "";
+  const totalValue = subtotalValue;
+  const depositPercentage = purchaseMode === "wholesale" ? formatDepositValue(product?.b2b?.deposit || {}, orderCurrency) : "";
   const depositNumeric = Number(String(product?.b2b?.deposit?.value || 0).replace(/[^\d.-]/g, "")) || 0;
   const depositAmountValue =
     purchaseMode === "wholesale" && product?.b2b?.deposit?.required && product?.b2b?.deposit?.type !== "fixed"
-      ? subtotalValue * (depositNumeric / 100)
+      ? totalValue * (depositNumeric / 100)
       : purchaseMode === "wholesale" && product?.b2b?.deposit?.required && product?.b2b?.deposit?.type === "fixed"
         ? depositNumeric
         : 0;
-  const balanceAmountValue = Math.max(0, subtotalValue - depositAmountValue);
+  const balanceAmountValue = Math.max(0, totalValue - depositAmountValue);
   const shippingCycle =
     purchaseMode === "wholesale"
       ? formatShippingTime(product?.b2b?.wholesaleLeadTime || product?.shippingDays || 0)
@@ -772,7 +847,7 @@ const createOrder = async (input) => {
     order_status: desiredOrderStatus,
     payment_status: desiredPaymentStatus,
     purchase_mode: purchaseMode,
-    currency: "USD",
+    currency: orderCurrency,
     payment_terms: paymentTerms || null,
     deposit_percentage: depositPercentage || null,
     customer_id: customer?.id || null,
@@ -786,8 +861,14 @@ const createOrder = async (input) => {
     quantity,
     unit_price: unitPriceValue,
     subtotal: subtotalValue,
+    total_amount: totalValue,
+    shipping_amount: 0,
+    tax_amount: 0,
+    discount_amount: 0,
+    deposit_amount: depositAmountValue,
+    balance_amount: balanceAmountValue,
     moq: moqText,
-    budget: formatCurrency(subtotalValue),
+    budget: formatCurrency(totalValue, orderCurrency),
     shipping_cycle: shippingCycle || null,
     message: String(payload.message || "").trim() || null,
     admin_note: "",
@@ -810,10 +891,23 @@ const createOrder = async (input) => {
     order_id: createdOrder.id,
     product_id: product.id,
     product_name: product.name || "",
+    product_name_snapshot: product.name || "",
+    sku_snapshot: String(product.sku || "").trim() || null,
+    product_image_snapshot: product.image || "",
     purchase_mode: purchaseMode,
     quantity,
     unit_price: unitPriceValue,
     subtotal: subtotalValue,
+    line_total: subtotalValue,
+    selected_price_tier_snapshot: wholesaleTier
+      ? {
+          id: wholesaleTier.id || "",
+          currency: orderCurrency,
+          minQuantity: Number(wholesaleTier.minQuantity || 1),
+          maxQuantity: Number(wholesaleTier.maxQuantity || 0),
+          unitPrice: Number(wholesaleTier.unitPrice || 0),
+        }
+      : null,
     moq: moqText,
     shipping_cycle: shippingCycle || null,
     created_at: nowIso(),
@@ -821,11 +915,36 @@ const createOrder = async (input) => {
   };
 
   const orderItemInsertStartedAt = performance.now();
-  await requestSupabase("order_items", {
-    method: "POST",
-    headers: { Prefer: "return=minimal" },
-    body: orderItemRow,
-  });
+  try {
+    await requestSupabase("order_items", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: orderItemRow,
+    });
+  } catch (error) {
+    if (
+      ![
+        "order_items.selected_price_tier_snapshot",
+        "order_items.product_name_snapshot",
+        "order_items.product_image_snapshot",
+        "order_items.sku_snapshot",
+        "order_items.line_total",
+      ].some((columnName) => isMissingColumnError(error, columnName))
+    ) {
+      throw error;
+    }
+    await requestSupabase("order_items", {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: omitKeys(orderItemRow, [
+        "selected_price_tier_snapshot",
+        "product_name_snapshot",
+        "product_image_snapshot",
+        "sku_snapshot",
+        "line_total",
+      ]),
+    });
+  }
   mark("order_items_insert", orderItemInsertStartedAt);
 
   const responseOrder = {

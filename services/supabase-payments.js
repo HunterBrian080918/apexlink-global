@@ -60,10 +60,56 @@ const requestSupabase = async (tablePath, options = {}) => {
 
 const escapeFilterValue = (value) => encodeURIComponent(String(value || "").trim());
 const nowIso = () => new Date().toISOString();
+const PAYMENT_STAGE_UNIQUE_INDEX = "payments_order_stage_unique";
+const getMissingPaymentColumns = (error) => {
+  const message = String(error?.message || "");
+  const candidateColumns = [
+    "payment_provider",
+    "settlement_channel",
+    "transaction_id",
+    "paypal_order_id",
+    "paypal_capture_id",
+    "payment_proof_url",
+    "note",
+  ];
+
+  return candidateColumns.filter((columnName) => {
+    const bareColumnMessage =
+      message.includes(`column payments.${columnName} does not exist`) ||
+      message.includes(`column ${columnName} does not exist`) ||
+      message.includes(`Could not find the '${columnName}' column of 'payments' in the schema cache`);
+    return bareColumnMessage;
+  });
+};
+const withMissingColumnRetries = async (executor, payload) => {
+  const body = payload;
+  const removedColumns = new Set();
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      return await executor(body);
+    } catch (error) {
+      const missingColumns = getMissingPaymentColumns(error).filter((columnName) => !removedColumns.has(columnName));
+      if (!missingColumns.length) {
+        throw error;
+      }
+      missingColumns.forEach((columnName) => {
+        removedColumns.add(columnName);
+        delete body[columnName];
+      });
+    }
+  }
+
+  return executor(body);
+};
 
 const parseAmount = (value, fallback = 0) => {
   const parsed = Number(String(value ?? "").replace(/[^\d.-]/g, ""));
   return Number.isFinite(parsed) ? parsed : fallback;
+};
+const toNullableText = (value) => {
+  const normalized = String(value ?? "").trim();
+  return normalized || null;
 };
 
 const formatCurrency = (value) => `$${Number(value || 0).toFixed(2)}`;
@@ -134,8 +180,8 @@ const mapPaymentRow = (row) => ({
   billingAddress: String(row?.billing_address || "").trim(),
   customerEmail: String(row?.customer_email || "").trim(),
   customerPhone: String(row?.customer_phone || "").trim(),
-  transactionId: String(row?.transaction_id || row?.provider_reference || "").trim(),
-  providerReference: String(row?.provider_reference || "").trim(),
+  transactionId: String(row?.transaction_id || "").trim(),
+  providerReference: String(row?.transaction_id || "").trim(),
   paypalOrderId: String(row?.paypal_order_id || "").trim(),
   paypalCaptureId: String(row?.paypal_capture_id || "").trim(),
   paymentProofUrl: String(row?.payment_proof_url || "").trim(),
@@ -162,6 +208,28 @@ const getPaymentById = async (id) => {
 
   const rows = await requestSupabase(`payments?select=*&id=eq.${escapeFilterValue(paymentId)}&limit=1`);
   return Array.isArray(rows) && rows[0] ? mapPaymentRow(rows[0]) : null;
+};
+
+const getPaymentByOrderAndType = async (orderId, paymentType) => {
+  const normalizedOrderId = String(orderId || "").trim();
+  const normalizedPaymentType = normalizePaymentType(paymentType);
+  if (!normalizedOrderId || normalizedPaymentType === "refund") {
+    return null;
+  }
+
+  const rows = await requestSupabase(
+    `payments?select=*&order_id=eq.${escapeFilterValue(normalizedOrderId)}&payment_type=eq.${escapeFilterValue(normalizedPaymentType)}&limit=1`
+  );
+  return Array.isArray(rows) && rows[0] ? mapPaymentRow(rows[0]) : null;
+};
+
+const isPaymentStageUniqueViolation = (error) => {
+  const code = String(error?.payload?.code || error?.code || "").trim();
+  const message = String(error?.message || "");
+  return code === "23505" && (
+    message.includes(PAYMENT_STAGE_UNIQUE_INDEX) ||
+    /\(order_id,\s*payment_type\)/i.test(message)
+  );
 };
 
 const listPaymentsByOrder = async (orderId) => {
@@ -203,46 +271,131 @@ const getPaymentByPayPalCaptureId = async (paypalCaptureId) => {
 const hasDepositConfiguration = (order) =>
   parseAmount(order?.depositPercentage, 0) > 0 || parseAmount(order?.depositAmount, 0) > 0;
 
-const getNextPaymentType = (order, existingPayments) => {
+const isSettledPayment = (payment) =>
+  new Set(["paid", "deposit_paid"]).has(normalizePaymentStatus(payment?.status || "pending"));
+
+const resolveNextPaymentStage = (order, existingPayments) => {
   const items = Array.isArray(existingPayments) ? existingPayments : [];
-  const hasDeposit = items.some((payment) => payment.paymentType === "deposit");
-  const hasBalance = items.some((payment) => payment.paymentType === "balance");
-  const hasFullPayment = items.some((payment) => payment.paymentType === "full-payment");
+  const findPayment = (type) => items.find((payment) => payment.paymentType === type) || null;
+  const fullPayment = findPayment("full-payment");
 
   if ((order?.purchaseMode || "") !== "wholesale") {
-    return hasFullPayment ? "" : "full-payment";
+    return {
+      paymentType: isSettledPayment(fullPayment) ? "" : "full-payment",
+      payment: fullPayment,
+      complete: isSettledPayment(fullPayment),
+    };
   }
 
   if (!hasDepositConfiguration(order)) {
-    return hasFullPayment ? "" : "full-payment";
+    return {
+      paymentType: isSettledPayment(fullPayment) ? "" : "full-payment",
+      payment: fullPayment,
+      complete: isSettledPayment(fullPayment),
+    };
   }
 
-  if (!hasDeposit) {
-    return "deposit";
+  const depositPayment = findPayment("deposit");
+  if (!isSettledPayment(depositPayment)) {
+    return {
+      paymentType: "deposit",
+      payment: depositPayment,
+      complete: false,
+    };
   }
 
-  if (!hasBalance) {
-    return "balance";
-  }
-
-  return "";
+  const balancePayment = findPayment("balance");
+  return {
+    paymentType: isSettledPayment(balancePayment) ? "" : "balance",
+    payment: balancePayment,
+    complete: isSettledPayment(balancePayment),
+  };
 };
 
-const deriveAmountByType = (order, paymentType, requestedAmount) => {
-  const fallbackSubtotal = parseAmount(order?.subtotal, 0);
-  if (requestedAmount > 0) {
-    return requestedAmount;
-  }
+const getNextPaymentType = (order, existingPayments) =>
+  resolveNextPaymentStage(order, existingPayments).paymentType;
+
+const deriveAmountByType = (order, paymentType) => {
+  const total = parseAmount(order?.totalAmount || order?.subtotal, 0);
+  const configuredDeposit = parseAmount(order?.depositAmount, 0);
+  const depositPercentage = parseAmount(order?.depositPercentage, 0);
+  const deposit = configuredDeposit > 0 ? configuredDeposit : total * (depositPercentage / 100);
 
   if (paymentType === "deposit") {
-    return parseAmount(order?.depositAmount, fallbackSubtotal);
+    return Math.min(total, Math.max(0, deposit));
   }
 
   if (paymentType === "balance") {
-    return parseAmount(order?.balanceAmount, fallbackSubtotal);
+    const configuredBalance = parseAmount(order?.balanceAmount, 0);
+    return configuredBalance > 0 ? configuredBalance : Math.max(0, total - deposit);
   }
 
-  return fallbackSubtotal;
+  return total;
+};
+
+const deriveOrderPaymentStatus = (order, payments) => {
+  const items = Array.isArray(payments) ? payments : [];
+  if (!items.length) {
+    return "unpaid";
+  }
+
+  const paidItems = items.filter(
+    (payment) => payment.paymentType !== "refund" && isSettledPayment(payment)
+  );
+  const paidAmount = paidItems.reduce((total, payment) => total + parseAmount(payment.amount, 0), 0);
+  const orderTotal = parseAmount(order?.totalAmount || order?.subtotal, 0);
+  const hasDepositPaid = paidItems.some((payment) => payment.paymentType === "deposit");
+  const hasRefund = items.some((payment) => normalizePaymentStatus(payment.status) === "refunded");
+  const hasPartialRefund = items.some((payment) => normalizePaymentStatus(payment.status) === "partially_refunded");
+
+  if (orderTotal > 0 && paidAmount >= orderTotal - 0.005) {
+    return hasRefund || hasPartialRefund ? "partially_refunded" : "paid";
+  }
+
+  if (hasDepositPaid && hasDepositConfiguration(order)) {
+    return hasRefund || hasPartialRefund ? "partially_refunded" : "deposit_paid";
+  }
+
+  if (paidAmount > 0 || items.some((payment) => normalizePaymentStatus(payment.status) === "partially_paid")) {
+    return "partially_paid";
+  }
+
+  if (hasRefund) {
+    return "refunded";
+  }
+  if (hasPartialRefund) {
+    return "partially_refunded";
+  }
+  if (items.some((payment) => ["pending", "awaiting_payment", "payment_submitted"].includes(normalizePaymentStatus(payment.status)))) {
+    return "pending";
+  }
+  if (items.every((payment) => normalizePaymentStatus(payment.status) === "failed")) {
+    return "failed";
+  }
+  if (items.every((payment) => normalizePaymentStatus(payment.status) === "cancelled")) {
+    return "cancelled";
+  }
+  return "unpaid";
+};
+
+const syncOrderPaymentStatus = async (orderId, options = {}) => {
+  const order = await getOrderById(orderId);
+  if (!order?.id) {
+    throw new Error("Order not found while synchronizing payment status.");
+  }
+  const payments = await listPaymentsByOrder(order.id);
+  const paymentStatus = deriveOrderPaymentStatus(order, payments);
+  if (String(order.paymentStatus || "unpaid") === paymentStatus) {
+    return order;
+  }
+  return updateOrder(
+    order.id,
+    { paymentStatus },
+    {
+      createEvents: true,
+      createdBy: String(options.createdBy || "system").trim() || "system",
+    }
+  );
 };
 
 const createPaymentForOrder = async (orderId, input) => {
@@ -257,19 +410,30 @@ const createPaymentForOrder = async (orderId, input) => {
   }
 
   const existingPayments = await listPaymentsByOrder(order.id);
+  const stage = resolveNextPaymentStage(order, existingPayments);
   const requestedType = String(input?.paymentType || "").trim();
-  const paymentType = normalizePaymentType(requestedType || getNextPaymentType(order, existingPayments));
+  const paymentType = normalizePaymentType(requestedType || stage.paymentType);
 
-  if (!paymentType) {
+  if (!stage.paymentType) {
     throw new Error("All required payment records for this order have already been created.");
   }
 
-  if (existingPayments.some((payment) => payment.paymentType === paymentType)) {
-    throw new Error(`A ${paymentType} payment record already exists for this order.`);
+  if (paymentType !== stage.paymentType) {
+    throw new Error(`The next required payment stage is ${stage.paymentType}.`);
   }
 
-  const requestedAmount = parseAmount(input?.amount, 0);
-  const amount = deriveAmountByType(order, paymentType, requestedAmount);
+  if (stage.payment?.id) {
+    return {
+      payment: stage.payment,
+      order,
+      idempotent: true,
+    };
+  }
+
+  const amount = deriveAmountByType(order, paymentType);
+  if (!(amount > 0)) {
+    throw new Error("The order payment amount is unavailable.");
+  }
   const depositAmount = paymentType === "deposit" ? amount : parseAmount(input?.depositAmount, 0);
   const balanceAmount = paymentType === "balance" ? amount : parseAmount(input?.balanceAmount, 0);
   const paymentMethod = String(input?.paymentMethod || "").trim();
@@ -294,52 +458,67 @@ const createPaymentForOrder = async (orderId, input) => {
     billing_address: String(order.billingAddress || order.shippingAddress || "").trim() || null,
     customer_email: String(order.email || "").trim().toLowerCase() || null,
     customer_phone: String(order.phone || "").trim() || null,
-    transaction_id: String(input?.transactionId || input?.providerReference || "").trim() || null,
-    provider_reference: String(input?.providerReference || "").trim() || null,
-    paypal_order_id: String(input?.paypalOrderId || "").trim() || null,
-    paypal_capture_id: String(input?.paypalCaptureId || "").trim() || null,
-    payment_proof_url: String(input?.paymentProofUrl || "").trim() || null,
-    note: String(input?.note || "").trim() || null,
     status: normalizePaymentStatus(input?.status || "pending"),
     created_at: nowIso(),
     updated_at: nowIso(),
     paid_at:
       String(input?.status || "").trim().toLowerCase() === "paid" ? String(input?.paidAt || nowIso()) : null,
+    ...(toNullableText(input?.transactionId || input?.providerReference)
+      ? { transaction_id: toNullableText(input?.transactionId || input?.providerReference) }
+      : {}),
+    ...(toNullableText(input?.paypalOrderId) ? { paypal_order_id: toNullableText(input?.paypalOrderId) } : {}),
+    ...(toNullableText(input?.paypalCaptureId)
+      ? { paypal_capture_id: toNullableText(input?.paypalCaptureId) }
+      : {}),
+    ...(toNullableText(input?.paymentProofUrl)
+      ? { payment_proof_url: toNullableText(input?.paymentProofUrl) }
+      : {}),
+    ...(toNullableText(input?.note) ? { note: toNullableText(input?.note) } : {}),
   };
 
   let createdRows;
   try {
-    createdRows = await requestSupabase("payments", {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: insertPayload,
-    });
-  } catch (error) {
-    const message = String(error?.message || "");
-    if (/payment_provider|settlement_channel|transaction_id|paypal_order_id|paypal_capture_id|payment_proof_url|provider_reference|note/i.test(message)) {
-      delete insertPayload.payment_provider;
-      delete insertPayload.settlement_channel;
-      delete insertPayload.transaction_id;
-      delete insertPayload.paypal_order_id;
-      delete insertPayload.paypal_capture_id;
-      delete insertPayload.payment_proof_url;
-      delete insertPayload.provider_reference;
-      delete insertPayload.note;
-      createdRows = await requestSupabase("payments", {
-        method: "POST",
-        headers: { Prefer: "return=representation" },
-        body: insertPayload,
-      });
-    } else if (/check constraint/i.test(message) && /status/i.test(message)) {
+    try {
+      createdRows = await withMissingColumnRetries(
+        (body) =>
+          requestSupabase("payments", {
+            method: "POST",
+            headers: { Prefer: "return=representation" },
+            body,
+          }),
+        insertPayload
+      );
+    } catch (error) {
+      const message = String(error?.message || "");
+      if (!/check constraint/i.test(message) || !/status/i.test(message)) {
+        throw error;
+      }
       insertPayload.status = "pending";
-      createdRows = await requestSupabase("payments", {
-        method: "POST",
-        headers: { Prefer: "return=representation" },
-        body: insertPayload,
-      });
-    } else {
+      createdRows = await withMissingColumnRetries(
+        (body) =>
+          requestSupabase("payments", {
+            method: "POST",
+            headers: { Prefer: "return=representation" },
+            body,
+          }),
+        insertPayload
+      );
+    }
+  } catch (error) {
+    if (!isPaymentStageUniqueViolation(error)) {
       throw error;
     }
+
+    const existingPayment = await getPaymentByOrderAndType(order.id, paymentType);
+    if (!existingPayment?.id) {
+      throw error;
+    }
+
+    return {
+      payment: existingPayment,
+      order: (await getOrderById(order.id)) || order,
+      idempotent: true,
+    };
   }
 
   const createdPayment = Array.isArray(createdRows) && createdRows[0] ? mapPaymentRow(createdRows[0]) : null;
@@ -347,18 +526,17 @@ const createPaymentForOrder = async (orderId, input) => {
     throw new Error("Supabase did not return the created payment.");
   }
 
-  const nextOrderPaymentStatus = createdPayment.status || "pending";
-  const updatedOrder = await updateOrder(
+  await updateOrder(
     order.id,
     {
       paymentMethod,
-      paymentStatus: nextOrderPaymentStatus,
     },
     {
       createEvents: true,
       createdBy: "customer",
     }
   );
+  const updatedOrder = await syncOrderPaymentStatus(order.id, { createdBy: "customer" });
 
   await createOrderEvent(order.id, {
     eventType: "payment_created",
@@ -375,6 +553,49 @@ const createPaymentForOrder = async (orderId, input) => {
   return {
     payment: createdPayment,
     order: updatedOrder,
+    idempotent: false,
+  };
+};
+
+const reviewBankTransferPayment = async (paymentId, nextStatus, options = {}) => {
+  const normalizedPaymentId = String(paymentId || "").trim();
+  const normalizedStatus = String(nextStatus || "").trim().toLowerCase();
+  if (!normalizedPaymentId) {
+    throw new Error("Payment id is required.");
+  }
+  if (!new Set(["paid", "failed"]).has(normalizedStatus)) {
+    throw new Error("Bank transfer review status must be paid or failed.");
+  }
+
+  let result;
+  try {
+    result = await requestSupabase("rpc/review_bank_transfer_payment", {
+      method: "POST",
+      body: {
+        p_payment_id: normalizedPaymentId,
+        p_next_status: normalizedStatus,
+        p_created_by: String(options.createdBy || "admin").trim() || "admin",
+      },
+    });
+  } catch (error) {
+    if (/review_bank_transfer_payment|schema cache|function/i.test(String(error?.message || ""))) {
+      error.status = 503;
+      error.message =
+        "Atomic bank transfer confirmation is unavailable. Apply the Phase 1 payment integrity migration.";
+    }
+    throw error;
+  }
+
+  const payment = await getPaymentById(normalizedPaymentId);
+  const order = payment?.orderId ? await getOrderById(payment.orderId) : null;
+  if (!payment?.id || !order?.id) {
+    throw new Error("Atomic bank transfer confirmation did not return persisted records.");
+  }
+
+  return {
+    payment,
+    order,
+    idempotent: Boolean(result?.idempotent),
   };
 };
 
@@ -399,7 +620,9 @@ const updatePayment = async (paymentId, partial, options = {}) => {
   }
 
   if (partial?.providerReference !== undefined) {
-    patch.provider_reference = String(partial.providerReference || "").trim() || null;
+    if (partial?.transactionId === undefined) {
+      patch.transaction_id = String(partial.providerReference || "").trim() || null;
+    }
   }
 
   if (partial?.settlementChannel !== undefined) {
@@ -439,35 +662,29 @@ const updatePayment = async (paymentId, partial, options = {}) => {
 
   let updatedRows;
   try {
-    updatedRows = await requestSupabase(`payments?id=eq.${escapeFilterValue(normalizedPaymentId)}`, {
-      method: "PATCH",
-      headers: { Prefer: "return=representation" },
-      body: patch,
-    });
+    updatedRows = await withMissingColumnRetries(
+      (body) =>
+        requestSupabase(`payments?id=eq.${escapeFilterValue(normalizedPaymentId)}`, {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body,
+        }),
+      patch
+    );
   } catch (error) {
     const message = String(error?.message || "");
-    if (/payment_provider|settlement_channel|transaction_id|paypal_order_id|paypal_capture_id|payment_proof_url|provider_reference|note/i.test(message)) {
-      delete patch.payment_provider;
-      delete patch.settlement_channel;
-      delete patch.transaction_id;
-      delete patch.paypal_order_id;
-      delete patch.paypal_capture_id;
-      delete patch.payment_proof_url;
-      delete patch.provider_reference;
-      delete patch.note;
-      updatedRows = await requestSupabase(`payments?id=eq.${escapeFilterValue(normalizedPaymentId)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=representation" },
-        body: patch,
-      });
-    } else if (/check constraint/i.test(message) && /status/i.test(message) && patch.status) {
+    if (/check constraint/i.test(message) && /status/i.test(message) && patch.status) {
       patch.status =
         patch.status === "paid" || patch.status === "failed" || patch.status === "refunded" ? patch.status : "pending";
-      updatedRows = await requestSupabase(`payments?id=eq.${escapeFilterValue(normalizedPaymentId)}`, {
-        method: "PATCH",
-        headers: { Prefer: "return=representation" },
-        body: patch,
-      });
+      updatedRows = await withMissingColumnRetries(
+        (body) =>
+          requestSupabase(`payments?id=eq.${escapeFilterValue(normalizedPaymentId)}`, {
+            method: "PATCH",
+            headers: { Prefer: "return=representation" },
+            body,
+          }),
+        patch
+      );
     } else {
       throw error;
     }
@@ -504,6 +721,10 @@ const updatePayment = async (paymentId, partial, options = {}) => {
     }
   }
 
+  if (options.syncOrder !== false) {
+    await syncOrderPaymentStatus(updatedPayment.orderId, { createdBy });
+  }
+
   return updatedPayment;
 };
 
@@ -513,7 +734,12 @@ module.exports = {
   listPaymentsByOrder,
   getPaymentByPayPalOrderId,
   getPaymentByPayPalCaptureId,
+  getPaymentByOrderAndType,
   createPaymentForOrder,
+  reviewBankTransferPayment,
   updatePayment,
+  resolveNextPaymentStage,
+  deriveOrderPaymentStatus,
+  syncOrderPaymentStatus,
   isRevenueStatus,
 };

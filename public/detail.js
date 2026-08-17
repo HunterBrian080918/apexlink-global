@@ -13,11 +13,22 @@ const routes = window.ApexLinkRoutes || {
 
 let currentProduct = null;
 let currentPurchaseMode = "retail";
+let currentWholesaleCurrency = "USD";
+let currentWholesaleQuantity = 1;
+const DEFAULT_WHOLESALE_CURRENCY = "USD";
 
-const getCheckoutUrl = (productId, mode) => {
+const getCheckoutUrl = (productId, mode, options = {}) => {
   const base = routes.checkout(productId);
-  const separator = base.includes("?") ? "&" : "?";
-  return `${base}${separator}mode=${encodeURIComponent(mode)}`;
+  const params = new URLSearchParams(base.split("?")[1] || "");
+  params.set("mode", mode);
+  if (options.currency) {
+    params.set("currency", String(options.currency || "").trim().toUpperCase());
+  }
+  if (options.quantity) {
+    params.set("quantity", String(Math.max(1, Number(options.quantity || 1))));
+  }
+  const pathname = base.split("?")[0];
+  return `${pathname}?${params.toString()}`;
 };
 
 const upsertMeta = (name, content) => {
@@ -44,6 +55,19 @@ const upsertCanonical = (href) => {
     document.head.appendChild(node);
   }
   node.setAttribute("href", href);
+};
+
+const upsertPropertyMeta = (property, content) => {
+  if (!property || !content) {
+    return;
+  }
+  let node = document.querySelector(`meta[property="${property}"]`);
+  if (!node) {
+    node = document.createElement("meta");
+    node.setAttribute("property", property);
+    document.head.appendChild(node);
+  }
+  node.setAttribute("content", content);
 };
 
 const upsertJsonLd = (id, payload) => {
@@ -92,9 +116,22 @@ const requestJson = async (url, options = {}) => {
   return payload;
 };
 
-const formatCurrency = (value) => {
+const formatCurrency = (value, currency = "USD") => {
   const amount = Number(value || 0);
-  return Number.isFinite(amount) ? `$${amount.toFixed(2)}` : "$0.00";
+  const normalizedCurrency = String(currency || "USD").trim().toUpperCase() || "USD";
+  if (!Number.isFinite(amount)) {
+    return normalizedCurrency === "HKD" ? "HK$0.00" : "$0.00";
+  }
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: normalizedCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch (error) {
+    return `${normalizedCurrency} ${amount.toFixed(2)}`;
+  }
 };
 
 const formatLeadTime = (value, fallback = "") => {
@@ -121,10 +158,75 @@ const getRetailPriceLabel = (product) => {
   return retailPriceValue > 0 ? formatCurrency(retailPriceValue) : "$0.00";
 };
 
-const getWholesalePriceTiers = (product) =>
+const getWholesalePriceTiers = (product, currency = DEFAULT_WHOLESALE_CURRENCY) =>
   Array.isArray(product?.b2b?.priceTiers)
-    ? product.b2b.priceTiers.filter((tier) => Number(tier?.unitPrice || 0) > 0)
+    ? product.b2b.priceTiers
+        .filter((tier) => String(tier?.currency || DEFAULT_WHOLESALE_CURRENCY).trim().toUpperCase() === currency)
+        .filter((tier) => Number(tier?.unitPrice || 0) > 0)
+        .slice()
+        .sort((left, right) => Number(left?.minQuantity || 0) - Number(right?.minQuantity || 0))
     : [];
+
+const resolveWholesaleTier = (tiers, quantity) => {
+  const nextQuantity = Math.max(1, Number(quantity || 1));
+  const sortedTiers = Array.isArray(tiers)
+    ? tiers
+        .filter((tier) => Number(tier?.unitPrice || 0) > 0)
+        .slice()
+        .sort((left, right) => Number(left?.minQuantity || 0) - Number(right?.minQuantity || 0))
+    : [];
+
+  if (!sortedTiers.length) {
+    return null;
+  }
+
+  return (
+    sortedTiers.find((tier) => {
+      const min = Math.max(1, Number(tier?.minQuantity || 1));
+      const max = Math.max(0, Number(tier?.maxQuantity || 0));
+      return nextQuantity >= min && (max === 0 || nextQuantity <= max);
+    }) || null
+  );
+};
+
+const getAvailableWholesaleCurrencies = (product) => {
+  const currencies = Array.from(
+    new Set(
+      (Array.isArray(product?.b2b?.priceTiers) ? product.b2b.priceTiers : [])
+        .map((tier) => String(tier?.currency || DEFAULT_WHOLESALE_CURRENCY).trim().toUpperCase())
+        .filter((currency) => ["USD", "HKD"].includes(currency))
+    )
+  );
+  return currencies.length ? currencies : [DEFAULT_WHOLESALE_CURRENCY];
+};
+
+const getWholesalePricingState = (product, quantity, currency) => {
+  const tiers = getWholesalePriceTiers(product, currency);
+  const matchedTier = resolveWholesaleTier(tiers, quantity);
+  const normalizedQuantity = Math.max(1, Number(quantity || 1));
+  const subtotalValue = Number(matchedTier?.unitPrice || 0) * normalizedQuantity;
+  const totalValue = subtotalValue;
+  const depositConfig = product?.b2b?.deposit || {};
+  const depositRawValue = Number(depositConfig?.value || 0);
+  const depositAmountValue =
+    depositConfig?.required && depositRawValue > 0
+      ? depositConfig?.type === "fixed"
+        ? depositRawValue
+        : totalValue * (depositRawValue / 100)
+      : 0;
+
+  return {
+    currency,
+    quantity: normalizedQuantity,
+    tiers,
+    matchedTier,
+    pricingAvailable: Boolean(matchedTier && Number(matchedTier.unitPrice || 0) > 0),
+    subtotalValue,
+    totalValue,
+    depositAmountValue,
+    balanceAmountValue: Math.max(0, totalValue - depositAmountValue),
+  };
+};
 
 const getProductKeywordList = (product) => {
   const values = [
@@ -144,18 +246,35 @@ const getProductSeoDescription = (product, brandName) => {
   return `${brandName} provides ${product.name} and related ${category.toLowerCase()} for global buyers, wholesale sourcing, and OEM workspace supply.`;
 };
 
-const applyProductSeo = (product, brandName) => {
+const applyProductSeo = (product, brandName, seoDefaults = {}) => {
   if (!product) {
     return;
   }
 
-  const canonicalUrl = `${window.location.origin}/detail?id=${encodeURIComponent(product.id)}`;
+  let canonicalBaseUrl = "https://avelixlink.com";
+  try {
+    const parsedCanonicalBase = new URL(String(seoDefaults.canonicalBaseUrl || canonicalBaseUrl).trim());
+    if (["http:", "https:"].includes(parsedCanonicalBase.protocol)) {
+      canonicalBaseUrl = `${parsedCanonicalBase.origin}${parsedCanonicalBase.pathname.replace(/\/+$/, "")}`;
+    }
+  } catch (error) {
+    canonicalBaseUrl = "https://avelixlink.com";
+  }
+  const canonicalUrl = new URL(`/detail?id=${encodeURIComponent(product.id)}`, `${canonicalBaseUrl}/`).toString();
   const keywordList = getProductKeywordList(product);
   const seoTitle = String(product.seoTitle || "").trim() || getProductSeoTitle(product, brandName);
   const seoDescription = String(product.metaDescription || "").trim() || getProductSeoDescription(product, brandName);
-  const wholesalePriceTiers = getWholesalePriceTiers(product);
+  const wholesalePriceTiers = getWholesalePriceTiers(product, DEFAULT_WHOLESALE_CURRENCY);
   const retailPriceValue = Number(product?.b2c?.retailPrice || 0);
-  const primaryImage = String(product.image || "").trim();
+  const primaryImageValue = String(product.image || seoDefaults.ogImage || "").trim();
+  let primaryImage = primaryImageValue;
+  if (primaryImageValue) {
+    try {
+      primaryImage = new URL(primaryImageValue, `${canonicalBaseUrl}/`).toString();
+    } catch (error) {
+      primaryImage = primaryImageValue;
+    }
+  }
   const offer =
     retailPriceValue > 0
       ? {
@@ -168,7 +287,7 @@ const applyProductSeo = (product, brandName) => {
       : wholesalePriceTiers.length
         ? {
             "@type": "AggregateOffer",
-            priceCurrency: "USD",
+            priceCurrency: DEFAULT_WHOLESALE_CURRENCY,
             lowPrice: Number(wholesalePriceTiers[wholesalePriceTiers.length - 1]?.unitPrice || wholesalePriceTiers[0]?.unitPrice || 0).toFixed(2),
             highPrice: Number(wholesalePriceTiers[0]?.unitPrice || 0).toFixed(2),
             offerCount: wholesalePriceTiers.length,
@@ -185,6 +304,11 @@ const applyProductSeo = (product, brandName) => {
   upsertMeta("description", seoDescription);
   upsertMeta("keywords", keywordList.join(", "));
   upsertCanonical(canonicalUrl);
+  upsertPropertyMeta("og:title", seoTitle || seoDefaults.ogTitle || product.name);
+  upsertPropertyMeta("og:description", seoDescription || seoDefaults.ogDescription || seoDefaults.metaDescription);
+  upsertPropertyMeta("og:image", primaryImage);
+  upsertPropertyMeta("og:url", canonicalUrl);
+  upsertPropertyMeta("og:type", "product");
   upsertJsonLd("product-schema", {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -226,7 +350,7 @@ const setupNavigation = () => {
   });
 };
 
-const renderDetail = (product, brandName) => {
+const renderDetail = (product, brandName, seoDefaults = {}) => {
   if (!detailRoot) {
     return;
   }
@@ -237,14 +361,18 @@ const renderDetail = (product, brandName) => {
     return;
   }
 
-  applyProductSeo(product, brandName);
+  applyProductSeo(product, brandName, seoDefaults);
   const retailEnabled = product.b2c?.enabled !== false;
   const wholesaleEnabled = product.b2b?.enabled !== false;
   const retailPrice = getRetailPriceLabel(product);
   const retailShippingTime = formatLeadTime(product.shippingDays, product.shippingTime);
   const wholesaleMoq = Math.max(1, Number(product.b2b?.wholesaleMoq || product.moqValue || 1));
   const wholesaleLeadTime = formatLeadTime(product.b2b?.wholesaleLeadTime, product.shippingTime);
-  const wholesalePriceTiers = getWholesalePriceTiers(product);
+  const wholesaleCurrencies = getAvailableWholesaleCurrencies(product);
+  currentWholesaleCurrency = wholesaleCurrencies.includes(currentWholesaleCurrency)
+    ? currentWholesaleCurrency
+    : wholesaleCurrencies[0] || DEFAULT_WHOLESALE_CURRENCY;
+  currentWholesaleQuantity = Math.max(wholesaleMoq, currentWholesaleQuantity || wholesaleMoq);
   const wholesaleDeposit = product.b2b?.deposit || {};
   const showWholesaleDeposit = Boolean(wholesaleDeposit.required);
   const wholesaleDepositLabel = showWholesaleDeposit ? formatDepositValue(wholesaleDeposit) : "";
@@ -415,15 +543,24 @@ const renderDetail = (product, brandName) => {
     });
 
     if (currentPurchaseMode === "wholesale") {
+      const pricingState = getWholesalePricingState(product, currentWholesaleQuantity, currentWholesaleCurrency);
+      const wholesalePriceTiers = getWholesalePriceTiers(product, currentWholesaleCurrency);
+      const currentTierRange = pricingState.matchedTier
+        ? (() => {
+            const min = Math.max(1, Number(pricingState.matchedTier.minQuantity || 1));
+            const max = Math.max(0, Number(pricingState.matchedTier.maxQuantity || 0));
+            return max > 0 ? `${min}-${max}` : `${min}+`;
+          })()
+        : "Request a Quote";
       if (priceValueNode) {
-        priceValueNode.textContent = wholesalePriceTiers.length
-          ? `${formatCurrency(wholesalePriceTiers[0].unitPrice)}+`
-          : "Contact us for wholesale pricing";
+        priceValueNode.textContent = pricingState.pricingAvailable
+          ? formatCurrency(pricingState.matchedTier.unitPrice, currentWholesaleCurrency)
+          : "Request a Quote";
       }
       if (priceMetaNode) {
-        priceMetaNode.textContent = wholesalePriceTiers.length
-          ? "Tiered wholesale pricing based on quantity."
-          : "Pricing is available on request for wholesale orders.";
+        priceMetaNode.textContent = pricingState.pricingAvailable
+          ? `Volume tier pricing in ${currentWholesaleCurrency}.`
+          : "Selected quantity is outside the configured wholesale tiers.";
       }
       if (purchaseMetaNode) {
         purchaseMetaNode.hidden = true;
@@ -445,7 +582,7 @@ const renderDetail = (product, brandName) => {
                   return `
                     <div class="detail-info-tier" role="row">
                       <span>${range}</span>
-                      <strong>${formatCurrency(tier.unitPrice)}</strong>
+                      <strong>${formatCurrency(tier.unitPrice, currentWholesaleCurrency)}</strong>
                     </div>
                   `;
                 })
@@ -457,9 +594,56 @@ const renderDetail = (product, brandName) => {
         purchasePanelNode.innerHTML = `
           <div class="detail-info-grid">
             ${renderInfoCard(
+              "Quote Setup",
+              `
+                <div class="detail-quote-controls">
+                  ${
+                    wholesaleCurrencies.length > 1
+                      ? `
+                        <label class="detail-quote-field">
+                          <span>Currency</span>
+                          <select id="detail-wholesale-currency">
+                            ${wholesaleCurrencies
+                              .map(
+                                (currency) => `
+                                  <option value="${escapeHtml(currency)}" ${currency === currentWholesaleCurrency ? "selected" : ""}>
+                                    ${escapeHtml(currency)}
+                                  </option>
+                                `
+                              )
+                              .join("")}
+                          </select>
+                        </label>
+                      `
+                      : `
+                        <div class="detail-quote-field">
+                          <span>Currency</span>
+                          <strong>${escapeHtml(currentWholesaleCurrency)}</strong>
+                        </div>
+                      `
+                  }
+                  <label class="detail-quote-field">
+                    <span>Quantity</span>
+                    <input
+                      id="detail-wholesale-quantity"
+                      type="number"
+                      min="${wholesaleMoq}"
+                      step="1"
+                      value="${currentWholesaleQuantity}"
+                    >
+                  </label>
+                </div>
+              `,
+              "detail-info-card--wide"
+            )}
+            ${renderInfoCard(
               "Pricing",
               `
                 ${wholesalePricingMarkup}
+                ${renderInfoItem("Current Tier", currentTierRange)}
+                ${renderInfoItem("Unit Price", pricingState.pricingAvailable ? formatCurrency(pricingState.matchedTier.unitPrice, currentWholesaleCurrency) : "Request a Quote")}
+                ${renderInfoItem("Subtotal", pricingState.pricingAvailable ? formatCurrency(pricingState.subtotalValue, currentWholesaleCurrency) : "Request a Quote")}
+                ${renderInfoItem("Total", pricingState.pricingAvailable ? formatCurrency(pricingState.totalValue, currentWholesaleCurrency) : "Request a Quote")}
                 ${renderInfoItem("MOQ", `${wholesaleMoq} units`)}
               `,
               "detail-info-card--wide"
@@ -470,7 +654,21 @@ const renderDetail = (product, brandName) => {
                 ${renderInfoItem("Lead Time", escapeHtml(wholesaleLeadTime))}
                 ${
                   showWholesaleDeposit
-                    ? renderInfoItem("Deposit Percentage", escapeHtml(wholesaleDepositLabel))
+                    ? `
+                      ${renderInfoItem("Deposit Percentage", escapeHtml(wholesaleDepositLabel))}
+                      ${renderInfoItem(
+                        "Deposit Amount",
+                        pricingState.pricingAvailable
+                          ? formatCurrency(pricingState.depositAmountValue, currentWholesaleCurrency)
+                          : "Request a Quote"
+                      )}
+                      ${renderInfoItem(
+                        "Balance Amount",
+                        pricingState.pricingAvailable
+                          ? formatCurrency(pricingState.balanceAmountValue, currentWholesaleCurrency)
+                          : "Request a Quote"
+                      )}
+                    `
                     : ""
                 }
               `
@@ -481,9 +679,38 @@ const renderDetail = (product, brandName) => {
       }
       if (purchaseActionsNode) {
         purchaseActionsNode.innerHTML = `
-          <a class="btn btn-primary" href="${getCheckoutUrl(product.id, "wholesale")}">Request Wholesale Quote</a>
+          ${
+            pricingState.pricingAvailable
+              ? `
+                <a
+                  class="btn btn-primary"
+                  href="${getCheckoutUrl(product.id, "wholesale", {
+                    currency: currentWholesaleCurrency,
+                    quantity: currentWholesaleQuantity,
+                  })}"
+                >
+                  Continue to Wholesale Checkout
+                </a>
+              `
+              : `
+                <button class="btn btn-primary" type="button" disabled>
+                  Request Wholesale Quote
+                </button>
+              `
+          }
         `;
       }
+
+      detailRoot.querySelector("#detail-wholesale-currency")?.addEventListener("change", (event) => {
+        currentWholesaleCurrency = String(event.target.value || DEFAULT_WHOLESALE_CURRENCY).trim().toUpperCase();
+        renderPurchaseMode("wholesale");
+      });
+
+      detailRoot.querySelector("#detail-wholesale-quantity")?.addEventListener("input", (event) => {
+        const nextQuantity = Math.max(wholesaleMoq, Number.parseInt(String(event.target.value || wholesaleMoq), 10) || wholesaleMoq);
+        currentWholesaleQuantity = nextQuantity;
+        renderPurchaseMode("wholesale");
+      });
       return;
     }
 
@@ -597,9 +824,9 @@ const setupForm = () => {
 };
 
 const wholesaleBudgetLabel = (product) => {
-  const tiers = getWholesalePriceTiers(product);
+  const tiers = getWholesalePriceTiers(product, DEFAULT_WHOLESALE_CURRENCY);
   const firstTier = tiers.find((tier) => Number(tier?.unitPrice || 0) > 0);
-  return firstTier ? formatCurrency(firstTier.unitPrice) : "Contact for wholesale pricing";
+  return firstTier ? formatCurrency(firstTier.unitPrice, DEFAULT_WHOLESALE_CURRENCY) : "Contact for wholesale pricing";
 };
 
 const initPage = async () => {
@@ -615,7 +842,7 @@ const initPage = async () => {
   const id = params.get("id");
   currentProduct = id ? await store.getProductById(id) : (await store.getProducts())[0] || null;
 
-  renderDetail(currentProduct, website?.brand?.name || "AvelixLink");
+  renderDetail(currentProduct, website?.brand?.name || "AvelixLink", website?.seo || {});
   setupRevealAnimations();
 };
 

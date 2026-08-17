@@ -95,6 +95,63 @@ const paypalRequest = async (pathname, options = {}) => {
 
 const formatAmount = (value) => Number(Number(value || 0).toFixed(2)).toFixed(2);
 
+const toMinorUnits = (value, scale = 2) => {
+  const normalized = String(value ?? "").trim();
+  const match = normalized.match(/^(-?)(\d+)(?:\.(\d+))?$/);
+  if (!match) {
+    throw new Error("Payment amount is not a valid decimal value.");
+  }
+
+  const fraction = String(match[3] || "");
+  if (fraction.length > scale && /[^0]/.test(fraction.slice(scale))) {
+    throw new Error("Payment amount has unsupported decimal precision.");
+  }
+
+  const paddedFraction = fraction.slice(0, scale).padEnd(scale, "0");
+  const units = BigInt(match[2]) * (10n ** BigInt(scale)) + BigInt(paddedFraction || "0");
+  return match[1] ? -units : units;
+};
+
+const createIntegrityError = (message, code) => {
+  const error = new Error(message);
+  error.status = 422;
+  error.code = code;
+  return error;
+};
+
+const assertCaptureIntegrity = ({ capturedAmount, capturedCurrency, expectedAmount, expectedCurrency }) => {
+  const normalizedCapturedCurrency = String(capturedCurrency || "").trim().toUpperCase();
+  const normalizedExpectedCurrency = String(expectedCurrency || "").trim().toUpperCase();
+
+  if (!normalizedCapturedCurrency || normalizedCapturedCurrency !== normalizedExpectedCurrency) {
+    throw createIntegrityError(
+      "PayPal captured currency does not match the expected payment currency.",
+      "PAYPAL_CURRENCY_MISMATCH"
+    );
+  }
+
+  let capturedMinorUnits;
+  let expectedMinorUnits;
+  try {
+    capturedMinorUnits = toMinorUnits(capturedAmount);
+    expectedMinorUnits = toMinorUnits(expectedAmount);
+  } catch (error) {
+    throw createIntegrityError(
+      `PayPal payment amount validation failed: ${error.message}`,
+      "PAYPAL_AMOUNT_INVALID"
+    );
+  }
+
+  if (capturedMinorUnits !== expectedMinorUnits) {
+    throw createIntegrityError(
+      "PayPal captured amount does not match the expected payment amount.",
+      "PAYPAL_AMOUNT_MISMATCH"
+    );
+  }
+
+  return true;
+};
+
 const findPayPalLink = (payload, rels) => {
   const links = Array.isArray(payload?.links) ? payload.links : [];
   const relationOrder = Array.isArray(rels) ? rels : [rels];
@@ -188,6 +245,8 @@ const captureOrder = async (paypalOrderId) => {
     status: String(payload?.status || "").trim(),
     captureId: String(capture?.id || "").trim(),
     captureStatus: String(capture?.status || "").trim(),
+    capturedAmount: String(capture?.amount?.value || "").trim(),
+    capturedCurrency: String(capture?.amount?.currency_code || "").trim().toUpperCase(),
     paidAt: String(capture?.create_time || capture?.update_time || "").trim(),
     payerEmail: String(payload?.payer?.email_address || "").trim(),
     raw: payload,
@@ -224,4 +283,6 @@ module.exports = {
   captureOrder,
   verifyWebhookSignature,
   getConfigurationStatus,
+  assertCaptureIntegrity,
+  toMinorUnits,
 };

@@ -171,18 +171,49 @@ const normalizeBankTransferCurrency = (value, fields) => {
     return accumulator;
   }, {});
 };
-const normalizeBankTransferSettings = (value) => {
+const normalizeSupportedCurrencyList = (value, fallback = []) => {
+  const normalized = Array.from(
+    new Set(
+      asStringArray(value)
+        .map((item) => String(item || "").trim().toUpperCase())
+        .filter((item) => ["USD", "HKD"].includes(item))
+    )
+  );
+  return normalized.length ? normalized : fallback;
+};
+const normalizePaymentMethodCurrencies = (value) => {
   const source = asObject(value);
   return {
+    paypal: normalizeSupportedCurrencyList(source.paypal, ["USD"]),
+  };
+};
+const normalizeBankTransferSettings = (value) => {
+  const source = asObject(value);
+  const normalizeAccount = (account) => {
+    const details = asObject(account);
+    const beneficiaryName = asText(details.beneficiaryName, asText(details.accountName));
+    const swiftBic = asText(details.swiftBic, asText(details.swiftCode));
+    return {
+      enabled:
+        details.enabled !== undefined
+          ? Boolean(details.enabled)
+          : Boolean(beneficiaryName && asText(details.bankName) && asText(details.accountNumber) && swiftBic),
+      beneficiaryName,
+      bankName: asText(details.bankName),
+      accountNumber: asText(details.accountNumber),
+      swiftBic,
+      bankAddress: asText(details.bankAddress),
+      beneficiaryAddress: asText(details.beneficiaryAddress),
+      intermediaryBank: asText(details.intermediaryBank),
+      intermediarySwiftBic: asText(details.intermediarySwiftBic, asText(details.intermediarySwift)),
+      instructions: asText(details.instructions),
+    };
+  };
+  return {
     providerName: asText(source.providerName, "WorldFirst"),
-    usd: normalizeBankTransferCurrency(source.usd, [
-      "bankName",
-      "accountName",
-      "accountNumber",
-      "swiftCode",
-    ]),
-    eur: normalizeBankTransferCurrency(source.eur, ["bankName", "iban", "accountName"]),
-    gbp: normalizeBankTransferCurrency(source.gbp, ["bankName", "accountName", "accountNumber", "sortCode"]),
+    settlementChannel: asText(source.settlementChannel, asText(source.providerName, "WorldFirst")),
+    usd: normalizeAccount(source.usd),
+    hkd: normalizeAccount(source.hkd),
   };
 };
 const asNullableText = (value) => {
@@ -304,6 +335,17 @@ const buildDefaultSiteConfig = () => {
           seo.metaKeywords,
           "workspace products, desk accessories, productivity, workspace setup, premium office essentials"
         ),
+        canonicalBaseUrl: asText(seo.canonicalBaseUrl, "https://avelixlink.com"),
+        allowIndexing: seo.allowIndexing !== false,
+        ogTitle: asText(seo.ogTitle, asText(brand.browserTitle, `${brandName} | Premium Workspace Innovation`)),
+        ogDescription: asText(
+          seo.ogDescription,
+          asText(
+            seo.metaDescription,
+            "Premium workspace products designed to improve productivity, organization and comfort."
+          )
+        ),
+        ogImage: asText(seo.ogImage, asText(brand.logoImage)),
       },
     },
     homepage: {
@@ -331,6 +373,7 @@ const buildDefaultSiteConfig = () => {
     },
     settings: {
       paymentMethods: asStringArray(settings.paymentMethods || ["PayPal", "Bank Transfer"]),
+      paymentMethodCurrencies: normalizePaymentMethodCurrencies(settings.paymentMethodCurrencies),
       language: asText(settings.language, "English"),
       themeColor: asText(settings.themeColor, "#111827"),
       systemConfig: asText(settings.systemConfig),
@@ -411,6 +454,14 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
       seo: {
         metaDescription: asText(websiteRow?.seo_meta_description, defaults.website.seo.metaDescription),
         metaKeywords: asText(websiteRow?.seo_meta_keywords, defaults.website.seo.metaKeywords),
+        canonicalBaseUrl: asText(websiteRow?.seo_canonical_base_url, defaults.website.seo.canonicalBaseUrl),
+        allowIndexing:
+          typeof websiteRow?.seo_allow_indexing === "boolean"
+            ? websiteRow.seo_allow_indexing
+            : defaults.website.seo.allowIndexing,
+        ogTitle: asText(websiteRow?.seo_og_title, defaults.website.seo.ogTitle),
+        ogDescription: asText(websiteRow?.seo_og_description, defaults.website.seo.ogDescription),
+        ogImage: asText(websiteRow?.seo_og_image, defaults.website.seo.ogImage),
       },
     },
     homepage: {
@@ -432,6 +483,7 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
     },
     settings: {
       paymentMethods: withFallbackArray(appRow?.payment_methods, defaults.settings.paymentMethods),
+      paymentMethodCurrencies: normalizePaymentMethodCurrencies(systemConfig.cms?.paymentMethodCurrencies),
       language: asText(appRow?.language, defaults.settings.language),
       themeColor: asText(appRow?.theme_color, defaults.settings.themeColor),
       systemConfig: asText(systemConfig.rawText, defaults.settings.systemConfig),
@@ -541,6 +593,11 @@ const serializeWebsiteSettingsRow = (config, existingRow) => ({
   social_x: asNullableText(config?.website?.social?.x),
   seo_meta_description: asNullableText(config?.website?.seo?.metaDescription),
   seo_meta_keywords: asNullableText(config?.website?.seo?.metaKeywords),
+  seo_canonical_base_url: asNullableText(config?.website?.seo?.canonicalBaseUrl),
+  seo_allow_indexing: config?.website?.seo?.allowIndexing !== false,
+  seo_og_title: asNullableText(config?.website?.seo?.ogTitle),
+  seo_og_description: asNullableText(config?.website?.seo?.ogDescription),
+  seo_og_image: asNullableText(config?.website?.seo?.ogImage),
   created_at: existingRow?.created_at || nowIso(),
   updated_at: nowIso(),
 });
@@ -560,6 +617,12 @@ const serializeAppSettingsRow = (config, existingRow) => {
     !Array.isArray(nextCms.bankTransferSettings)
       ? { ...nextCms.bankTransferSettings }
       : {};
+  const nextPaymentMethodCurrencies =
+    nextCms.paymentMethodCurrencies &&
+    typeof nextCms.paymentMethodCurrencies === "object" &&
+    !Array.isArray(nextCms.paymentMethodCurrencies)
+      ? { ...nextCms.paymentMethodCurrencies }
+      : {};
   const homepageSubtitle = asNullableText(config?.homepage?.subtitle);
   const heroSubtitle = asNullableText(config?.website?.hero?.subtitle);
 
@@ -575,11 +638,20 @@ const serializeAppSettingsRow = (config, existingRow) => {
     delete nextCms.homepage;
   }
 
+  const normalizedPaymentMethodCurrencies = normalizePaymentMethodCurrencies(config?.settings?.paymentMethodCurrencies);
+  if (Object.values(normalizedPaymentMethodCurrencies).some((items) => Array.isArray(items) && items.length)) {
+    nextCms.paymentMethodCurrencies = {
+      ...nextPaymentMethodCurrencies,
+      ...normalizedPaymentMethodCurrencies,
+    };
+  } else {
+    delete nextCms.paymentMethodCurrencies;
+  }
+
   const normalizedBankTransferSettings = normalizeBankTransferSettings(config?.settings?.bankTransferSettings);
   if (
     Object.values(normalizedBankTransferSettings.usd).some(Boolean) ||
-    Object.values(normalizedBankTransferSettings.eur).some(Boolean) ||
-    Object.values(normalizedBankTransferSettings.gbp).some(Boolean) ||
+    Object.values(normalizedBankTransferSettings.hkd).some(Boolean) ||
     normalizedBankTransferSettings.providerName
   ) {
     nextCms.bankTransferSettings = {
@@ -665,7 +737,7 @@ const toPatchPayload = (input) => {
     patch.homepage = asObject(source.homepage);
   }
 
-  ["paymentMethods", "language", "themeColor", "systemConfig", "bankTransferSettings"].forEach((key) => {
+  ["paymentMethods", "paymentMethodCurrencies", "language", "themeColor", "systemConfig", "bankTransferSettings"].forEach((key) => {
     if (source[key] !== undefined) {
       if (!patch.settings) {
         patch.settings = {};

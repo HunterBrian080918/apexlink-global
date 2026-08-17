@@ -60,7 +60,8 @@ const PRODUCT_IMAGE_SELECT = [
   "sort_order",
 ].join(",");
 const PRODUCT_IMAGE_SELECT_LEGACY = PRODUCT_IMAGE_SELECT.replace(",public_id", "");
-const PRODUCT_TIER_SELECT = ["id", "product_id", "min_quantity", "max_quantity", "unit_price", "sort_order"].join(",");
+const PRODUCT_TIER_SELECT = ["id", "product_id", "currency", "min_quantity", "max_quantity", "unit_price", "sort_order"].join(",");
+const PRODUCT_TIER_SELECT_LEGACY = PRODUCT_TIER_SELECT.replace("currency,", "");
 
 const requireConfig = () => {
   if (!SUPABASE_URL || !SUPABASE_ADMIN_KEY) {
@@ -154,6 +155,7 @@ const mapProductRow = (row, imageRows, tierRows) => ({
       .sort((left, right) => Number(left.sort_order || 0) - Number(right.sort_order || 0))
       .map((tier) => ({
         id: String(tier.id || ""),
+        currency: String(tier.currency || "USD").trim().toUpperCase(),
         minQuantity: Number(tier.min_quantity || 1),
         maxQuantity: tier.max_quantity === null || tier.max_quantity === undefined ? 0 : Number(tier.max_quantity || 0),
         unitPrice: Number(tier.unit_price || 0),
@@ -259,6 +261,7 @@ const mapPriceTiersToRows = (productId, priceTiers) =>
   (Array.isArray(priceTiers) ? priceTiers : []).map((tier, index) => ({
     id: String(tier?.id || `${productId}-tier-${index + 1}`),
     product_id: productId,
+    currency: String(tier?.currency || "USD").trim().toUpperCase() || "USD",
     min_quantity: Number(tier?.minQuantity || 1),
     max_quantity: Number(tier?.maxQuantity || 0) > 0 ? Number(tier.maxQuantity) : null,
     unit_price: Number(tier?.unitPrice || 0),
@@ -274,7 +277,16 @@ const fetchRelatedRows = async (productIds) => {
   }
 
   const filter = `product_id=in.(${productIds.map((id) => `"${String(id).replace(/"/g, '\\"')}"`).join(",")})`;
-  const tierRowsPromise = requestSupabase(`product_price_tiers?select=${PRODUCT_TIER_SELECT}&${filter}&order=sort_order.asc`);
+  const tierRowsPromise = (async () => {
+    try {
+      return await requestSupabase(`product_price_tiers?select=${PRODUCT_TIER_SELECT}&${filter}&order=sort_order.asc`);
+    } catch (error) {
+      if (!isMissingColumnError(error, "product_price_tiers.currency")) {
+        throw error;
+      }
+      return requestSupabase(`product_price_tiers?select=${PRODUCT_TIER_SELECT_LEGACY}&${filter}&order=sort_order.asc`);
+    }
+  })();
   let imageRows;
 
   try {
@@ -372,11 +384,27 @@ const replaceProductChildren = async (product) => {
   }
 
   if (tierRows.length) {
-    await requestSupabase("product_price_tiers", {
-      method: "POST",
-      headers: { Prefer: "return=representation" },
-      body: tierRows,
-    });
+    try {
+      await requestSupabase("product_price_tiers", {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: tierRows,
+      });
+    } catch (error) {
+      if (!isMissingColumnError(error, "product_price_tiers.currency")) {
+        throw error;
+      }
+      if (tierRows.some((row) => String(row.currency || "USD").trim().toUpperCase() !== "USD")) {
+        throw new Error(
+          "HKD wholesale tiers require the Supabase migration 20260811000100_product_tier_currency_hkd.sql."
+        );
+      }
+      await requestSupabase("product_price_tiers", {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: tierRows.map((row) => omitKey(row, "currency")),
+      });
+    }
   }
 };
 

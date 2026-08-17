@@ -82,27 +82,38 @@
       adminPassword: "",
       recoveryEmail: "",
       paymentMethods: ["PayPal", "Bank Transfer"],
+      paymentMethodCurrencies: {
+        paypal: ["USD"],
+      },
       language: "English",
       themeColor: "#111827",
       systemConfig: "",
       bankTransferSettings: {
         providerName: "WorldFirst",
+        settlementChannel: "WorldFirst",
         usd: {
+          enabled: false,
+          beneficiaryName: "",
           bankName: "",
-          accountName: "",
           accountNumber: "",
-          swiftCode: "",
+          swiftBic: "",
+          bankAddress: "",
+          beneficiaryAddress: "",
+          intermediaryBank: "",
+          intermediarySwiftBic: "",
+          instructions: "",
         },
-        eur: {
+        hkd: {
+          enabled: false,
+          beneficiaryName: "",
           bankName: "",
-          iban: "",
-          accountName: "",
-        },
-        gbp: {
-          bankName: "",
-          accountName: "",
           accountNumber: "",
-          sortCode: "",
+          swiftBic: "",
+          bankAddress: "",
+          beneficiaryAddress: "",
+          intermediaryBank: "",
+          intermediarySwiftBic: "",
+          instructions: "",
         },
       },
     },
@@ -135,6 +146,7 @@
 
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const nowIso = () => new Date().toISOString();
+  const SUPPORTED_PAYMENT_CURRENCIES = new Set(["USD", "HKD"]);
   const isAdminRoute = () => window.location.pathname.startsWith("/admin");
   const getHostname = () => String(window.location.hostname || "").trim().toLowerCase();
   const isLocalDevelopmentHost = () => {
@@ -235,11 +247,61 @@
 
     return payload;
   };
+  const normalizePaymentCurrencyCode = (value) => {
+    const normalized = String(value || "").trim().toUpperCase();
+    return SUPPORTED_PAYMENT_CURRENCIES.has(normalized) ? normalized : "USD";
+  };
+  const getSupportedPayPalCurrencies = (settings) => {
+    const source = asObject(asObject(settings).paymentMethodCurrencies);
+    const currencies = Array.from(
+      new Set(
+        asStringArray(source.paypal)
+          .map((item) => normalizePaymentCurrencyCode(item))
+          .filter(Boolean)
+      )
+    );
+    return currencies.length ? currencies : ["USD"];
+  };
+  const isBankTransferAccountConfigured = (details) => {
+    const source = asObject(details);
+    return Boolean(source.enabled) &&
+      ["beneficiaryName", "bankName", "accountNumber", "swiftBic"].every((field) => String(source[field] || "").trim());
+  };
+  const resolveBankTransferAccount = (settings, currency) => {
+    const normalizedSettings = normalizeSettings(settings);
+    const bankTransferSettings = asObject(normalizedSettings.bankTransferSettings);
+    const currencyCode = normalizePaymentCurrencyCode(currency);
+    const currencyKey = currencyCode.toLowerCase();
+    const details =
+      bankTransferSettings[currencyKey] && typeof bankTransferSettings[currencyKey] === "object"
+        ? bankTransferSettings[currencyKey]
+        : {};
+    return {
+      currency: currencyCode,
+      providerName: String(bankTransferSettings.providerName || "WorldFirst").trim() || "WorldFirst",
+      settlementChannel:
+        String(bankTransferSettings.settlementChannel || bankTransferSettings.providerName || "WorldFirst").trim() ||
+        "WorldFirst",
+      details,
+      available: isBankTransferAccountConfigured(details),
+    };
+  };
   const loadPersistedProducts = async () => {
     const payload = await requestJson("/api/products", {
       method: "GET",
     });
     return Array.isArray(payload?.products) ? payload.products : [];
+  };
+  const loadPersistedProductById = async (id) => {
+    const productId = String(id || "").trim();
+    if (!productId) {
+      return null;
+    }
+
+    const payload = await requestJson(`/api/products/${encodeURIComponent(productId)}`, {
+      method: "GET",
+    });
+    return payload?.product && typeof payload.product === "object" ? payload.product : null;
   };
   const uploadProductImage = async (file) => {
     if (!file) {
@@ -462,6 +524,7 @@
     const normalized = items
       .map((item, index) => ({
         id: String(item?.id || `tier-${index + 1}`),
+        currency: String(item?.currency || "USD").trim().toUpperCase() || "USD",
         minQuantity: Math.max(1, parseInteger(item?.minQuantity, 1)),
         maxQuantity: Math.max(0, parseInteger(item?.maxQuantity, 0)),
         unitPrice: parseNumber(item?.unitPrice, 0),
@@ -857,6 +920,13 @@
           "workspace products, desk accessories, productivity, workspace setup, premium office essentials",
           ["global sourcing, wholesale, ai match, suppliers, b2b"]
         ),
+        canonicalBaseUrl: String(seo.canonicalBaseUrl || "https://avelixlink.com").trim().replace(/\/+$/, ""),
+        allowIndexing: seo.allowIndexing !== false,
+        ogTitle: String(seo.ogTitle || brand.browserTitle || "AvelixLink | Premium Workspace Innovation").trim(),
+        ogDescription: String(
+          seo.ogDescription || seo.metaDescription || "Premium workspace products designed to improve productivity, organization and comfort."
+        ).trim(),
+        ogImage: String(seo.ogImage || brand.logoImage || "").trim(),
       },
     };
   };
@@ -881,12 +951,46 @@
         return true;
       });
     };
-    const normalizeBankTransferCurrency = (currency, fields) => {
+    const normalizePaymentMethodCurrencies = (value) => {
+      const source = asObject(value);
+      const normalizeCurrencyList = (items, fallback = []) => {
+        const normalized = Array.from(
+          new Set(
+            asStringArray(items)
+              .map((item) => String(item || "").trim().toUpperCase())
+              .filter((item) => ["USD", "HKD"].includes(item))
+          )
+        );
+        return normalized.length ? normalized : fallback;
+      };
+      return {
+        paypal: normalizeCurrencyList(source.paypal, ["USD"]),
+      };
+    };
+    const normalizeBankTransferCurrency = (currency) => {
       const source = asObject(currency);
-      return fields.reduce((accumulator, field) => {
-        accumulator[field] = String(source[field] || "");
-        return accumulator;
-      }, {});
+      const beneficiaryName = String(source.beneficiaryName || source.accountName || "");
+      const swiftBic = String(source.swiftBic || source.swiftCode || "");
+      return {
+        enabled:
+          source.enabled !== undefined
+            ? Boolean(source.enabled)
+            : Boolean(
+                beneficiaryName &&
+                  String(source.bankName || "").trim() &&
+                  String(source.accountNumber || "").trim() &&
+                  String(swiftBic || "").trim()
+              ),
+        beneficiaryName,
+        bankName: String(source.bankName || ""),
+        accountNumber: String(source.accountNumber || ""),
+        swiftBic,
+        bankAddress: String(source.bankAddress || ""),
+        beneficiaryAddress: String(source.beneficiaryAddress || ""),
+        intermediaryBank: String(source.intermediaryBank || ""),
+        intermediarySwiftBic: String(source.intermediarySwiftBic || source.intermediarySwift || ""),
+        instructions: String(source.instructions || ""),
+      };
     };
 
     return {
@@ -894,19 +998,15 @@
       adminPassword: "",
       recoveryEmail: normalizeEmailContact(settings.recoveryEmail),
       paymentMethods: filterSupportedPaymentMethods(settings.paymentMethods),
+      paymentMethodCurrencies: normalizePaymentMethodCurrencies(settings.paymentMethodCurrencies),
       language: String(settings.language || "English"),
       themeColor: String(settings.themeColor || "#111827"),
       systemConfig: String(settings.systemConfig || ""),
       bankTransferSettings: {
         providerName: String(bankTransferSettings.providerName || "WorldFirst"),
-        usd: normalizeBankTransferCurrency(bankTransferSettings.usd, [
-          "bankName",
-          "accountName",
-          "accountNumber",
-          "swiftCode",
-        ]),
-        eur: normalizeBankTransferCurrency(bankTransferSettings.eur, ["bankName", "iban", "accountName"]),
-        gbp: normalizeBankTransferCurrency(bankTransferSettings.gbp, ["bankName", "accountName", "accountNumber", "sortCode"]),
+        settlementChannel: String(bankTransferSettings.settlementChannel || bankTransferSettings.providerName || "WorldFirst"),
+        usd: normalizeBankTransferCurrency(bankTransferSettings.usd),
+        hkd: normalizeBankTransferCurrency(bankTransferSettings.hkd),
       },
     };
   };
@@ -1411,8 +1511,43 @@
 
   const getProducts = async () => withState((current) => clone(current.products));
 
-  const getProductById = async (id) =>
-    withState((current) => clone(current.products.find((item) => item.id === id) || null));
+  const getProductById = async (id, options = {}) => {
+    await init();
+    const productId = String(id || "").trim();
+    if (!productId) {
+      return null;
+    }
+
+    if (options.force !== false) {
+      try {
+        const persistedProduct = await loadPersistedProductById(productId);
+        if (persistedProduct && typeof persistedProduct === "object") {
+          const normalizedProduct = normalizeProduct(persistedProduct);
+          setState((current) => {
+            const existingProducts = Array.isArray(current.products) ? current.products.slice() : [];
+            const existingIndex = existingProducts.findIndex((item) => item.id === productId);
+
+            if (existingIndex >= 0) {
+              existingProducts[existingIndex] = normalizedProduct;
+            } else {
+              existingProducts.unshift(normalizedProduct);
+            }
+
+            return {
+              ...current,
+              products: existingProducts,
+            };
+          });
+
+          return clone(normalizedProduct);
+        }
+      } catch (error) {
+        console.error("[products] Product detail refresh failed, falling back to cached state:", error);
+      }
+    }
+
+    return withState((current) => clone(current.products.find((item) => item.id === productId) || null));
+  };
 
   const upsertProduct = async (value) => {
     await init();
@@ -1865,6 +2000,7 @@
       method: "PATCH",
       body: JSON.stringify({
         paymentMethods: nextSettings.paymentMethods,
+        paymentMethodCurrencies: nextSettings.paymentMethodCurrencies,
         language: nextSettings.language,
         themeColor: nextSettings.themeColor,
         systemConfig: nextSettings.systemConfig,
@@ -2081,6 +2217,10 @@
     getSettings,
     updateSettings,
     getSiteConfig,
+    normalizePaymentCurrencyCode,
+    getSupportedPayPalCurrencies,
+    resolveBankTransferAccount,
+    isBankTransferAccountConfigured,
     getAIMatchConfig,
     updateAIMatchConfig,
     exportState,

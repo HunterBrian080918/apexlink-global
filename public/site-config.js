@@ -51,6 +51,67 @@
     }
     return node;
   };
+  const ensurePropertyMetaTag = (property) => {
+    let node = document.querySelector(`meta[property="${property}"]`);
+    if (!node) {
+      node = document.createElement("meta");
+      node.setAttribute("property", property);
+      document.head.appendChild(node);
+    }
+    return node;
+  };
+  const ensureCanonicalTag = () => {
+    let node = document.querySelector('link[rel="canonical"]');
+    if (!node) {
+      node = document.createElement("link");
+      node.setAttribute("rel", "canonical");
+      document.head.appendChild(node);
+    }
+    return node;
+  };
+  const normalizeCanonicalBaseUrl = (value) => {
+    try {
+      const parsed = new URL(String(value || "https://avelixlink.com").trim());
+      if (!["http:", "https:"].includes(parsed.protocol)) return "https://avelixlink.com";
+      return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+    } catch (error) {
+      return "https://avelixlink.com";
+    }
+  };
+  const getCanonicalPath = () => {
+    const aliases = {
+      "/index.html": "/",
+      "/products.html": "/products",
+      "/about.html": "/about",
+      "/contact.html": "/contact",
+      "/support.html": "/support",
+      "/detail.html": "/detail",
+      "/privacy.html": "/privacy",
+      "/terms.html": "/terms",
+      "/shipping-policy": "/shipping",
+      "/shipping-policy.html": "/shipping",
+      "/shipping.html": "/shipping",
+      "/returns-refunds": "/refund",
+      "/returns-refunds.html": "/refund",
+      "/refund.html": "/refund",
+    };
+    const pathname = aliases[window.location.pathname] || window.location.pathname || "/";
+    if (pathname === "/detail") {
+      const productId = new URLSearchParams(window.location.search).get("id");
+      return productId ? `/detail?id=${encodeURIComponent(productId)}` : "/detail";
+    }
+    return pathname;
+  };
+  const getAbsoluteAssetUrl = (value, baseUrl) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) return "";
+    try {
+      return new URL(normalized, `${baseUrl}/`).toString();
+    } catch (error) {
+      return "";
+    }
+  };
+  const NON_INDEXABLE_PATHS = new Set(["/checkout", "/checkout.html", "/payment", "/payment.html", "/results", "/results.html"]);
   const ensureJsonLdScript = (id) => {
     let node = document.querySelector(`#${id}`);
     if (!node) {
@@ -110,6 +171,9 @@
       const logoTop = normalizeBrandName(brand.logoTop, "AvelixLink");
       const logoBottom = normalizeBrandBottom(brand.logoBottom);
       const isHomePage = document.body.classList.contains("page-home");
+      const canonicalBaseUrl = normalizeCanonicalBaseUrl(seo.canonicalBaseUrl);
+      const canonicalUrl = new URL(getCanonicalPath(), `${canonicalBaseUrl}/`).toString();
+      const indexingAllowed = seo.allowIndexing !== false && !NON_INDEXABLE_PATHS.has(window.location.pathname);
 
       document.querySelectorAll('link[rel~="icon"]').forEach((node) => {
         if (brand.favicon) {
@@ -132,6 +196,23 @@
         const parts = currentTitle.split("|").map((item) => item.trim());
         parts[parts.length - 1] = brandName;
         document.title = parts.join(" | ");
+      }
+
+      ensureCanonicalTag().setAttribute("href", canonicalUrl);
+      ensureMetaTag("robots").setAttribute("content", indexingAllowed ? "index,follow" : "noindex,nofollow");
+
+      const pageDescription = document.querySelector('meta[name="description"]')?.getAttribute("content") || "";
+      const ogTitle = isHomePage ? seo.ogTitle || document.title : document.title || seo.ogTitle;
+      const ogDescription = isHomePage
+        ? seo.ogDescription || seo.metaDescription || pageDescription
+        : pageDescription || seo.ogDescription || seo.metaDescription;
+      const ogImage = getAbsoluteAssetUrl(seo.ogImage || brand.logoImage, canonicalBaseUrl);
+      ensurePropertyMetaTag("og:title").setAttribute("content", ogTitle || brandName);
+      ensurePropertyMetaTag("og:description").setAttribute("content", ogDescription || "");
+      ensurePropertyMetaTag("og:url").setAttribute("content", canonicalUrl);
+      ensurePropertyMetaTag("og:type").setAttribute("content", "website");
+      if (ogImage) {
+        ensurePropertyMetaTag("og:image").setAttribute("content", ogImage);
       }
 
       document.querySelectorAll(".logo").forEach((logo) => {

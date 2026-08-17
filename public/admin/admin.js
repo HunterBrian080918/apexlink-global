@@ -99,6 +99,11 @@ const adminState = {
   orders: {
     query: "",
     status: "all",
+    mode: "all",
+    orderStatus: "all",
+    paymentStatus: "all",
+    shippingStatus: "all",
+    date: "",
     selectedId: null,
     timeline: {
       orderId: null,
@@ -113,7 +118,19 @@ const adminState = {
     selectedId: null,
     query: "",
     status: "all",
+    method: "all",
+    paymentType: "all",
+    currency: "all",
+    date: "",
     orderFilterId: "",
+  },
+  customerList: {
+    query: "",
+    type: "all",
+    country: "all",
+    status: "all",
+    selectedKey: null,
+    mode: "list",
   },
   customers: {
     selectedId: null,
@@ -121,6 +138,7 @@ const adminState = {
     status: "all",
     conversationType: "all",
     mobileView: "list",
+    detailsOpen: false,
   },
   products: {
     mode: "list",
@@ -299,7 +317,7 @@ const refreshNotifications = async () => {
 };
 
 const openAdminEntity = async (type, id) => {
-  if (type === "conversation") { adminState.activeSection = "customers"; adminState.customers.selectedId = id; }
+  if (type === "conversation") { adminState.activeSection = "support"; adminState.customers.selectedId = id; }
   else if (type === "order") { adminState.activeSection = "order"; adminState.orders.selectedId = id; }
   else if (type === "payment") { adminState.activeSection = "payments"; adminState.payments.mode = "detail"; adminState.payments.selectedId = id; }
   else if (type === "product") { adminState.activeSection = "products"; adminState.products.mode = "edit"; adminState.products.editingId = id; }
@@ -456,6 +474,12 @@ const updateAdminPayment = async (paymentId, payment) => {
   return payload?.payment || null;
 };
 
+const reviewAdminBankTransferPayment = async (paymentId, status) =>
+  requestJson(`/api/payments/${encodeURIComponent(paymentId)}/review-bank-transfer`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
+
 const fetchAdminSupportConversations = async (filters = {}) => {
   const params = new URLSearchParams();
   if (filters.query) {
@@ -548,7 +572,7 @@ const setAdminSupportLiveState = (state) => {
 };
 
 const getAdminSupportComposerDraft = () =>
-  adminState.activeSection === "customers"
+  adminState.activeSection === "support"
     ? String(contentRoot.querySelector("#customer-reply-form textarea")?.value || "")
     : "";
 
@@ -785,6 +809,8 @@ const formatMoney = (value, currency = "USD") => {
     return `${String(currency || "USD").toUpperCase()} ${amount.toFixed(2)}`;
   }
 };
+const parseMoneyValue = (value) => Number(String(value || "").replace(/[^\d.-]/g, "") || 0);
+const hasNonZeroAmount = (value) => Math.abs(parseMoneyValue(value)) > 0.0001;
 const toTextareaValue = (items) => (Array.isArray(items) ? items.join("\n") : "");
 
 const parseTextList = (value) =>
@@ -841,6 +867,7 @@ const fileToDataUrl = (file) =>
   });
 
 const getStatusClass = (status) => `status-${String(status || "").toLowerCase()}`;
+const getAdminPillStatusClass = (status) => getStatusClass(normalizeStatusValue(status).replace(/_/g, "-"));
 const formatPaymentStatusLabel = (status) =>
   String(status || "")
     .replace(/_/g, "-")
@@ -860,6 +887,41 @@ const formatPaymentProviderLabel = (provider, method = "") => {
     return "Bank Transfer";
   }
   return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (part) => part.toUpperCase());
+};
+const formatPaymentMethodLabel = (method) => {
+  const normalized = normalizePaymentMethodName(method);
+  if (!normalized) {
+    return "-";
+  }
+  if (normalized === "paypal") {
+    return "PayPal";
+  }
+  if (normalized === "bank transfer") {
+    return "Bank Transfer";
+  }
+  if (normalized === "cryptocurrency" || normalized === "crypto") {
+    return "Cryptocurrency";
+  }
+  return String(method || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (part) => part.toUpperCase());
+};
+const formatSettlementChannelLabel = (channel) => {
+  const normalized = normalizeStatusValue(channel);
+  if (!normalized) {
+    return "-";
+  }
+  if (normalized === "worldfirst" || normalized === "paypal") {
+    return "WorldFirst";
+  }
+  if (normalized === "crypto_provider") {
+    return "Crypto Provider";
+  }
+  return String(channel || "")
+    .trim()
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (part) => part.toUpperCase());
 };
@@ -919,9 +981,11 @@ const WHOLESALE_ORDER_STATUSES = [
   "quote_pending",
   "awaiting_confirmation",
   "awaiting_deposit",
+  "deposit_paid",
   "in_production",
   "quality_inspection",
   "awaiting_balance",
+  "balance_paid",
   "ready_to_ship",
   "shipped",
   "delivered",
@@ -953,12 +1017,12 @@ const ADMIN_PAYMENT_METHOD_OPTIONS = [
   {
     id: "paypal",
     label: "PayPal",
-    description: "Accept payments through PayPal Checkout",
+    description: "Accept payments through PayPal Checkout and settle through WorldFirst",
   },
   {
     id: "bank-transfer",
     label: "Bank Transfer",
-    description: "Receive international wire payments",
+    description: "Receive SWIFT international wire payments through WorldFirst",
   },
   {
     id: "wise",
@@ -969,6 +1033,11 @@ const ADMIN_PAYMENT_METHOD_OPTIONS = [
     id: "credit-card",
     label: "Credit Card",
     description: "Future card payment integration",
+  },
+  {
+    id: "cryptocurrency",
+    label: "Cryptocurrency",
+    description: "Connect a crypto payment provider to enable USDT / USDC settlement",
   },
 ];
 const isBankTransferPaymentRecord = (payment) =>
@@ -1022,26 +1091,33 @@ const renderNavIcon = (icon) => NAV_ICONS[icon] || NAV_ICONS.dashboard;
 
 const normalizeCurrencyCode = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
-  return ["usd", "eur", "gbp"].includes(normalized) ? normalized : "usd";
+  return ["usd", "hkd"].includes(normalized) ? normalized : "usd";
 };
 
 const BANK_TRANSFER_ACCOUNT_FIELDS = {
   usd: [
+    { name: "usdEnabled", prop: "enabled", label: "Enabled", type: "checkbox", full: true },
+    { name: "usdBeneficiaryName", prop: "beneficiaryName", label: "Beneficiary Name" },
     { name: "usdBankName", prop: "bankName", label: "Bank Name" },
-    { name: "usdAccountName", prop: "accountName", label: "Account Name" },
     { name: "usdAccountNumber", prop: "accountNumber", label: "Account Number" },
-    { name: "usdSwiftCode", prop: "swiftCode", label: "SWIFT / BIC" },
+    { name: "usdSwiftBic", prop: "swiftBic", label: "SWIFT / BIC" },
+    { name: "usdBankAddress", prop: "bankAddress", label: "Bank Address", full: true },
+    { name: "usdBeneficiaryAddress", prop: "beneficiaryAddress", label: "Beneficiary Address", full: true },
+    { name: "usdIntermediaryBank", prop: "intermediaryBank", label: "Intermediary Bank", full: true },
+    { name: "usdIntermediarySwiftBic", prop: "intermediarySwiftBic", label: "Intermediary SWIFT / BIC", full: true },
+    { name: "usdInstructions", prop: "instructions", label: "Instructions", type: "textarea", full: true },
   ],
-  eur: [
-    { name: "eurBankName", prop: "bankName", label: "Bank Name" },
-    { name: "eurAccountName", prop: "accountName", label: "Account Name" },
-    { name: "eurIban", prop: "iban", label: "IBAN", full: true },
-  ],
-  gbp: [
-    { name: "gbpBankName", prop: "bankName", label: "Bank Name" },
-    { name: "gbpAccountName", prop: "accountName", label: "Account Name" },
-    { name: "gbpAccountNumber", prop: "accountNumber", label: "Account Number" },
-    { name: "gbpSortCode", prop: "sortCode", label: "Sort Code" },
+  hkd: [
+    { name: "hkdEnabled", prop: "enabled", label: "Enabled", type: "checkbox", full: true },
+    { name: "hkdBeneficiaryName", prop: "beneficiaryName", label: "Beneficiary Name" },
+    { name: "hkdBankName", prop: "bankName", label: "Bank Name" },
+    { name: "hkdAccountNumber", prop: "accountNumber", label: "Account Number" },
+    { name: "hkdSwiftBic", prop: "swiftBic", label: "SWIFT / BIC" },
+    { name: "hkdBankAddress", prop: "bankAddress", label: "Bank Address", full: true },
+    { name: "hkdBeneficiaryAddress", prop: "beneficiaryAddress", label: "Beneficiary Address", full: true },
+    { name: "hkdIntermediaryBank", prop: "intermediaryBank", label: "Intermediary Bank", full: true },
+    { name: "hkdIntermediarySwiftBic", prop: "intermediarySwiftBic", label: "Intermediary SWIFT / BIC", full: true },
+    { name: "hkdInstructions", prop: "instructions", label: "Instructions", type: "textarea", full: true },
   ],
 };
 
@@ -1076,11 +1152,16 @@ const isBankTransferCurrencyConfigured = (currencyKey, details) => {
   const normalizedCurrency = normalizeCurrencyCode(currencyKey);
   const config = details && typeof details === "object" ? details : {};
   const requiredFields = BANK_TRANSFER_ACCOUNT_FIELDS[normalizedCurrency] || [];
-  return requiredFields.every((field) => String(config[field.prop] || "").trim());
+  return Boolean(config.enabled) && requiredFields.every((field) => {
+    if (field.prop === "enabled") {
+      return true;
+    }
+    return String(config[field.prop] || "").trim();
+  });
 };
 
 const getBankTransferCurrencyState = (bankTransferSettings = {}) => {
-  const currencies = ["usd", "eur", "gbp"];
+  const currencies = ["usd", "hkd"];
   return currencies.map((currencyKey) => {
     const details = bankTransferSettings[currencyKey] && typeof bankTransferSettings[currencyKey] === "object"
       ? bankTransferSettings[currencyKey]
@@ -1099,9 +1180,12 @@ const getPaymentSettingsMethodState = (method, enabledPaymentKeys, bankTransferS
   const isEnabled = enabledPaymentKeys.has(normalizedMethod);
 
   if (method.id === "paypal") {
+    const paypalCurrencies = Array.isArray(bankTransferSettings?.__paypalCurrencies)
+      ? bankTransferSettings.__paypalCurrencies
+      : ["USD"];
     return {
       enabled: isEnabled,
-      status: isEnabled ? "Configured" : "Not configured",
+      status: isEnabled ? `Configured (${paypalCurrencies.join(", ")})` : "Not configured",
       note: method.description,
       disabled: false,
     };
@@ -1125,6 +1209,53 @@ const getPaymentSettingsMethodState = (method, enabledPaymentKeys, bankTransferS
   };
 };
 
+const buildPaymentSettingsDraft = (formData, bankTransferSettings = {}) => {
+  const selectedPaymentMethods = getEnabledPaymentMethods(formData.getAll("paymentMethods"));
+  const selectedPayPalCurrencies = Array.from(
+    new Set(
+      formData
+        .getAll("paypalCurrencies")
+        .map((currency) => String(currency || "").trim().toUpperCase())
+        .filter((currency) => ["USD", "HKD"].includes(currency))
+    )
+  );
+
+  return {
+    paymentMethods: selectedPaymentMethods,
+    paymentMethodCurrencies: {
+      paypal: selectedPayPalCurrencies.length ? selectedPayPalCurrencies : ["USD"],
+    },
+    bankTransferSettings: {
+      providerName: String(bankTransferSettings.providerName || "WorldFirst").trim(),
+      settlementChannel: String(bankTransferSettings.settlementChannel || bankTransferSettings.providerName || "WorldFirst").trim(),
+      usd: {
+        enabled: formData.has("usdEnabled"),
+        beneficiaryName: formData.get("usdBeneficiaryName") ?? bankTransferSettings?.usd?.beneficiaryName ?? bankTransferSettings?.usd?.accountName ?? "",
+        bankName: formData.get("usdBankName") ?? bankTransferSettings?.usd?.bankName ?? "",
+        accountNumber: formData.get("usdAccountNumber") ?? bankTransferSettings?.usd?.accountNumber ?? "",
+        swiftBic: formData.get("usdSwiftBic") ?? bankTransferSettings?.usd?.swiftBic ?? bankTransferSettings?.usd?.swiftCode ?? "",
+        bankAddress: formData.get("usdBankAddress") ?? bankTransferSettings?.usd?.bankAddress ?? "",
+        beneficiaryAddress: formData.get("usdBeneficiaryAddress") ?? bankTransferSettings?.usd?.beneficiaryAddress ?? "",
+        intermediaryBank: formData.get("usdIntermediaryBank") ?? bankTransferSettings?.usd?.intermediaryBank ?? "",
+        intermediarySwiftBic: formData.get("usdIntermediarySwiftBic") ?? bankTransferSettings?.usd?.intermediarySwiftBic ?? "",
+        instructions: formData.get("usdInstructions") ?? bankTransferSettings?.usd?.instructions ?? "",
+      },
+      hkd: {
+        enabled: formData.has("hkdEnabled"),
+        beneficiaryName: formData.get("hkdBeneficiaryName") ?? bankTransferSettings?.hkd?.beneficiaryName ?? "",
+        bankName: formData.get("hkdBankName") ?? bankTransferSettings?.hkd?.bankName ?? "",
+        accountNumber: formData.get("hkdAccountNumber") ?? bankTransferSettings?.hkd?.accountNumber ?? "",
+        swiftBic: formData.get("hkdSwiftBic") ?? bankTransferSettings?.hkd?.swiftBic ?? "",
+        bankAddress: formData.get("hkdBankAddress") ?? bankTransferSettings?.hkd?.bankAddress ?? "",
+        beneficiaryAddress: formData.get("hkdBeneficiaryAddress") ?? bankTransferSettings?.hkd?.beneficiaryAddress ?? "",
+        intermediaryBank: formData.get("hkdIntermediaryBank") ?? bankTransferSettings?.hkd?.intermediaryBank ?? "",
+        intermediarySwiftBic: formData.get("hkdIntermediarySwiftBic") ?? bankTransferSettings?.hkd?.intermediarySwiftBic ?? "",
+        instructions: formData.get("hkdInstructions") ?? bankTransferSettings?.hkd?.instructions ?? "",
+      },
+    },
+  };
+};
+
 const setAdminSidebarOpen = (open) => {
   adminState.nav.drawerOpen = Boolean(open);
   shell?.classList.toggle("is-sidebar-open", adminState.nav.drawerOpen);
@@ -1141,10 +1272,7 @@ const getSectionRenderTarget = (section) => {
   if (normalized === "order") {
     return "order";
   }
-  if (["support", "customers"].includes(normalized)) {
-    return "customers";
-  }
-  if (["website-pages", "seo", "website"].includes(normalized)) {
+  if (["website-pages", "website"].includes(normalized)) {
     return "website";
   }
   if (["general-settings", "payment-settings", "shipping-settings", "account-settings", "settings"].includes(normalized)) {
@@ -1274,6 +1402,13 @@ const hydrateAdminRouteFromLocation = () => {
   const params = new URLSearchParams(window.location.search);
   adminState.activeSection = normalizeAdminSection(params.get("section"));
 
+  if (adminState.activeSection === "customers" && params.get("id")) {
+    adminState.activeSection = "support";
+    adminState.customers.selectedId = String(params.get("id") || "").trim() || null;
+  } else if (adminState.activeSection === "support") {
+    adminState.customers.selectedId = String(params.get("id") || params.get("conversationId") || "").trim() || null;
+  }
+
   if (adminState.activeSection === "orders" || adminState.activeSection === "order") {
     adminState.orders.selectedId =
       String(params.get("id") || params.get("orderId") || "").trim() || null;
@@ -1281,8 +1416,8 @@ const hydrateAdminRouteFromLocation = () => {
 
   if (adminState.activeSection === "payments") {
     adminState.payments.orderFilterId = String(params.get("orderId") || "").trim();
-    adminState.payments.selectedId = null;
-    adminState.payments.mode = "list";
+    adminState.payments.selectedId = String(params.get("paymentId") || "").trim() || null;
+    adminState.payments.mode = adminState.payments.selectedId ? "detail" : "list";
   }
 };
 
@@ -1303,6 +1438,10 @@ const syncAdminRoute = (mode = "replace") => {
     if (adminState.payments.selectedId) {
       params.set("paymentId", adminState.payments.selectedId);
     }
+  }
+
+  if (adminState.activeSection === "support" && adminState.customers.selectedId) {
+    params.set("id", adminState.customers.selectedId);
   }
 
   const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
@@ -1341,6 +1480,42 @@ const getPaymentStatusSelectOptions = (currentStatus) => {
     ? [normalizedCurrent, ...PAYMENT_REVIEW_STATUSES]
     : PAYMENT_REVIEW_STATUSES.slice();
   return [...new Set(options)];
+};
+
+const matchesAdminDateFilter = (value, expectedDate) => {
+  const normalizedDate = String(expectedDate || "").trim();
+  return !normalizedDate || String(value || "").slice(0, 10) === normalizedDate;
+};
+
+const getAdminOrderItemCount = (order) => {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  if (items.length) {
+    return items.reduce((total, item) => total + Math.max(0, Number(item?.quantity || 0)), 0);
+  }
+  return Math.max(0, Number(order?.quantity || 0));
+};
+
+const isPaidPaymentRecord = (payment) =>
+  ["paid", "confirmed", "deposit_paid"].includes(normalizeStatusValue(payment?.status));
+
+const getAdminOrderPaymentSummary = (order, payments) => {
+  const records = Array.isArray(payments) ? payments : [];
+  const paidAmount = records
+    .filter(isPaidPaymentRecord)
+    .reduce((total, payment) => total + Number(payment?.amount || 0), 0);
+  const totalAmount = parseMoneyValue(order?.totalAmount || order?.subtotal || 0);
+  const methods = Array.from(
+    new Set(records.map((payment) => formatPaymentMethodLabel(payment?.paymentMethod)).filter((method) => method && method !== "-"))
+  );
+
+  return {
+    paidAmount,
+    balanceDue: Math.max(0, totalAmount - paidAmount),
+    methods,
+    pendingBankTransfer: records.some(
+      (payment) => isBankTransferPaymentRecord(payment) && ["pending", "unpaid", "payment_submitted"].includes(normalizeStatusValue(payment.status))
+    ),
+  };
 };
 
 const buildOrderProgressSteps = (order) => {
@@ -1791,6 +1966,77 @@ const buildOrderPaymentHistory = (order, payments) => {
   }
 
   return history;
+};
+
+const isWorldFirstSettlementPayment = (payment) =>
+  normalizeStatusValue(payment?.settlementChannel || "") === "worldfirst";
+
+const buildWorldFirstProofText = (order, payment) => {
+  const firstItem = Array.isArray(order?.items) ? order.items[0] || null : null;
+  const totalText = String(order?.totalAmount || order?.subtotal || "-").trim() || "-";
+  const discountText = hasNonZeroAmount(order?.discountAmount) ? String(order.discountAmount || "-").trim() : "Not available";
+  const paymentAmountText = payment ? formatMoney(payment.amount, payment.currency || order?.currency || "USD") : "Not available";
+  const paymentStageLabel = payment ? formatPaymentTypeLabel(payment.paymentType) : "Not available";
+  const paidDate = payment?.paidAt ? formatDate(payment.paidAt) : "Not available";
+  const paymentReference =
+    String(payment?.transactionId || payment?.providerReference || payment?.paymentId || payment?.id || "").trim() ||
+    "Not available";
+  const trackingNumber =
+    String(order?.trackingNumber || order?.trackingNo || "").trim() || "Not available";
+  const carrier = String(order?.shippingCarrier || order?.carrier || "").trim() || "Not available";
+  const shippingStatus = String(order?.shippingStatusLabel || formatStatusLabel(order?.shippingStatus) || "").trim() || "Not available";
+  const paymentMethodLabel = formatPaymentMethodLabel(payment?.paymentMethod);
+  const settlementChannelLabel = formatSettlementChannelLabel(payment?.settlementChannel || "WorldFirst");
+  const paymentInformationLines = [
+    `Payment Stage: ${paymentStageLabel}`,
+    `Payment Method: ${paymentMethodLabel}`,
+    ...(isBankTransferPaymentRecord(payment) ? ["Transfer Type: SWIFT"] : []),
+    `Settlement Channel: ${settlementChannelLabel}`,
+    `Payment Amount: ${paymentAmountText}`,
+    `Payment Status: ${formatPaymentStatusLabel(payment?.status || "pending")}`,
+    `Paid Date: ${paidDate}`,
+    `Payment Reference: ${paymentReference}`,
+  ];
+
+  return [
+    "AVELIXLINK",
+    "WORLD FIRST TRANSACTION PROOF",
+    "",
+    "Order Information",
+    `Order Number: ${order?.orderNumber || order?.orderId || order?.id || "Not available"}`,
+    `Order Type: ${formatStatusLabel(order?.purchaseMode || "retail")}`,
+    `Order Date: ${order?.createdAt ? formatDate(order.createdAt) : "Not available"}`,
+    "",
+    "Buyer Information",
+    `Buyer Name: ${order?.customerName || "Not available"}`,
+    `Buyer Email: ${order?.email || "Not available"}`,
+    `Country/Region: ${order?.country || "Not available"}`,
+    `Shipping Address: ${order?.shippingAddress || "Not available"}`,
+    "",
+    "Transaction Details",
+    `Product: ${firstItem?.productName || order?.productName || "Not available"}`,
+    `SKU: ${firstItem?.sku || "Not available"}`,
+    `Quantity: ${firstItem?.quantity || order?.quantity || "Not available"}`,
+    `Unit Price: ${firstItem?.unitPrice || order?.unitPrice || "Not available"}`,
+    `Subtotal: ${order?.subtotal || "Not available"}`,
+    `Discount: ${discountText}`,
+    `Order Total: ${totalText}`,
+    `Currency: ${order?.currency || payment?.currency || "Not available"}`,
+    "",
+    "WorldFirst Payment Information",
+    ...paymentInformationLines,
+    "",
+    "Fulfillment Information",
+    `Shipping Status: ${shippingStatus}`,
+    `Carrier: ${carrier}`,
+    `Tracking Number: ${trackingNumber}`,
+    "",
+    "Transaction Statement",
+    "This document confirms that the WorldFirst payment referenced above corresponds to the genuine AvelixLink order described above.",
+    "The order and payment information in this document is generated from the corresponding AvelixLink order and payment records.",
+    "",
+    `Generated At: ${formatDate(new Date().toISOString())}`,
+  ].join("\n");
 };
 
 const deriveOrderPaymentStatusFromPayments = (order, payments) => {
@@ -2494,46 +2740,11 @@ const buildDashboardBreakdownList = (items, emptyTitle, emptyDescription) => {
   `;
 };
 
-const calculateDashboardTrend = (current, previous) => {
-  const safeCurrent = Number(current || 0);
-  const safePrevious = Number(previous || 0);
-  if (!safePrevious && !safeCurrent) {
-    return { direction: "flat", percentage: 0, label: "No change" };
-  }
-  if (!safePrevious && safeCurrent > 0) {
-    return { direction: "up", percentage: 100, label: "New activity" };
-  }
-
-  const delta = safeCurrent - safePrevious;
-  const percentage = Math.round((Math.abs(delta) / Math.max(Math.abs(safePrevious), 1)) * 100);
-  return {
-    direction: delta > 0 ? "up" : delta < 0 ? "down" : "flat",
-    percentage,
-    label: `${delta > 0 ? "Up" : delta < 0 ? "Down" : "Flat"} ${percentage}%`,
-  };
-};
-
-const renderDashboardTrend = (trend, comparisonLabel = "vs previous period") => {
-  const icon = trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "→";
-  return `
-    <span class="admin-dashboard-trend is-${escapeHtml(trend.direction)}">
-      <strong>${escapeHtml(icon)} ${trend.percentage}%</strong>
-      <small>${escapeHtml(comparisonLabel)}</small>
-    </span>
-  `;
-};
-
-const renderDashboardKpiCard = ({ icon, title, value, detail, trend, comparisonLabel }) => `
+const renderDashboardKpiCard = ({ title, value, detail }) => `
   <article class="admin-dashboard-kpi">
-    <div class="admin-dashboard-kpi-head">
-      <span class="admin-dashboard-kpi-icon" aria-hidden="true">${escapeHtml(icon)}</span>
-      <span>${escapeHtml(title)}</span>
-    </div>
+    <span class="admin-dashboard-kpi-title">${escapeHtml(title)}</span>
     <strong>${escapeHtml(value)}</strong>
-    <div class="admin-dashboard-kpi-foot">
-      ${renderDashboardTrend(trend, comparisonLabel)}
-      <small>${escapeHtml(detail)}</small>
-    </div>
+    <small>${escapeHtml(detail)}</small>
   </article>
 `;
 
@@ -2560,152 +2771,6 @@ const getSupportConversationHeaderSummary = (selected, customerOrders = []) => {
 const getAdminConversationContextLabel = (thread) =>
   String(getAdminConversationContext(thread) || "Support conversation").replace(/鈥\?/g, "•").replace(/\s+•\s+/g, " • ");
 
-const renderDashboardSectionLegacy = async () => {
-  const stats = null;
-  return renderDashboardSectionV2();
-  const visitTrend = stats.trends.visits.map((item) => ({
-    label: formatShortDate(item.key),
-    value: item.value,
-  }));
-  const orderTrend = stats.trends.orders.map((item) => ({
-    label: formatShortDate(item.key),
-    value: item.value,
-  }));
-  const showDevelopmentReset = Boolean(stats.environment?.isDevelopment);
-
-  contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <section class="admin-stat-grid">
-        <article class="admin-stat-card">
-          <span>Today's Visitors</span>
-          <strong>${formatNumber(stats.today.visits)}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Today's Inquiries</span>
-          <strong>${formatNumber(stats.today.inquiries)}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Unread Messages</span>
-          <strong>${formatNumber(stats.totals.unreadMessages)}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Pending Payments</span>
-          <strong>${formatNumber(stats.totals.pendingPayments)}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Today's Orders</span>
-          <strong>${formatNumber(stats.today.orders)}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Today's Revenue</span>
-          <strong>${escapeHtml(formatMoney(stats.today.revenue, "USD"))}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Weekly Revenue</span>
-          <strong>${escapeHtml(formatMoney(stats.totals.weeklyRevenue, "USD"))}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Monthly Revenue</span>
-          <strong>${escapeHtml(formatMoney(stats.totals.monthlyRevenue, "USD"))}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>System Status</span>
-          <strong class="admin-system-ok">Operational</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Wholesale Orders</span>
-          <strong>${formatNumber(stats.totals.wholesaleOrders)}</strong>
-        </article>
-        <article class="admin-stat-card">
-          <span>Total Products</span>
-          <strong>${formatNumber(stats.totals.products)}</strong>
-        </article>
-      </section>
-
-      <section class="admin-chart-grid">
-        <article class="admin-panel">
-          <div class="admin-panel-header">
-            <div>
-              <h3>Last 7 Days Visits</h3>
-              <p>Traffic trend only. No editing actions on this page.</p>
-            </div>
-            ${
-              showDevelopmentReset
-                ? '<button class="admin-secondary-button" type="button" id="dashboard-reset-analytics">Reset Test Analytics</button>'
-                : ""
-            }
-          </div>
-          ${buildLineChart(visitTrend)}
-        </article>
-
-        <article class="admin-panel">
-          <div class="admin-panel-header">
-            <div>
-              <h3>Last 7 Days Orders</h3>
-              <p>Daily order volume from the live order API.</p>
-            </div>
-          </div>
-          ${buildBarChart(orderTrend)}
-        </article>
-      </section>
-
-      <section class="admin-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Latest 5 Orders</h3>
-            <p>Newest orders and wholesale requests from the website.</p>
-          </div>
-        </div>
-        ${
-          stats.recentOrders.length
-            ? `
-              <div class="admin-recent-list">
-                ${stats.recentOrders
-                  .map(
-                    (order) => `
-                      <article class="admin-recent-item">
-                        <div>
-                          <strong>${escapeHtml(order.customerName || "Unknown Visitor")}</strong>
-                          <p>${escapeHtml(order.productName || "Order")} · ${escapeHtml(
-                            order.country || "No country"
-                          )}</p>
-                        </div>
-                        <div class="admin-recent-meta">
-                          <span class="admin-pill ${getStatusClass(order.orderStatus || order.status)}">${escapeHtml(
-                            formatStatusLabel(order.orderStatus || order.status)
-                          )}</span>
-                          <small>${escapeHtml(formatDate(order.createdAt))}</small>
-                        </div>
-                      </article>
-                    `
-                  )
-                  .join("")}
-              </div>
-            `
-            : renderEmptyState("No orders yet", "New website orders will appear here.")
-        }
-      </section>
-      <section class="admin-section-grid">
-        <article class="admin-panel">
-          <div class="admin-panel-header"><div><h3>Recent Messages</h3><p>Latest customer conversations.</p></div></div>
-          ${stats.recentMessages.length ? `<div class="admin-recent-list">${stats.recentMessages.map((item) => `<button class="admin-recent-item admin-dashboard-link" type="button" data-dashboard-conversation="${escapeHtml(item.id)}"><div><strong>${escapeHtml(item.customerName || item.email || "Customer")}</strong><p>${escapeHtml(item.lastMessageText || item.subject || "New conversation")}</p></div><small>${escapeHtml(formatDate(item.lastMessageAt || item.createdAt))}</small></button>`).join("")}</div>` : renderEmptyState("No messages", "New customer messages will appear here.")}
-        </article>
-        <article class="admin-panel">
-          <div class="admin-panel-header"><div><h3>Recent Customers</h3><p>Most recently active customers.</p></div></div>
-          ${stats.recentCustomers.length ? `<div class="admin-recent-list">${stats.recentCustomers.map((item) => `<button class="admin-recent-item admin-dashboard-link" type="button" data-dashboard-conversation="${escapeHtml(item.id)}"><div><strong>${escapeHtml(item.customerName || "Customer")}</strong><p>${escapeHtml(item.email || item.country || "No contact details")}</p></div><span class="admin-pill ${getStatusClass(item.status)}">${escapeHtml(formatStatusLabel(item.status))}</span></button>`).join("")}</div>` : renderEmptyState("No customers", "New customers will appear here.")}
-        </article>
-      </section>
-    </div>
-  `;
-
-  document.querySelector("#dashboard-reset-analytics")?.addEventListener("click", async () => {
-    await renderDashboardSectionV2();
-  });
-  contentRoot.querySelectorAll("[data-dashboard-conversation]").forEach((button) => button.addEventListener("click", async () => {
-    await openAdminEntity("conversation", button.dataset.dashboardConversation);
-  }));
-};
-
 const renderDashboardSection = async () => renderDashboardSectionV2();
 
 async function renderDashboardSectionV2() {
@@ -2731,79 +2796,32 @@ async function renderDashboardSectionV2() {
       label: formatShortDate(item.key),
       value: Number(item.value || 0),
     }));
-    const inquiryDelta = calculateDashboardTrend(
-      stats?.inquiries?.today || 0,
-      Number(stats?.inquiries?.trend7?.[stats?.inquiries?.trend7?.length - 2]?.value || 0)
-    );
-    const unreadDelta = calculateDashboardTrend(stats?.unreadMessages?.total || 0, stats?.conversations?.today || 0);
-    const pendingDelta = calculateDashboardTrend(
-      stats?.orders?.pending || 0,
-      Number(stats?.orders?.trend7?.[stats?.orders?.trend7?.length - 2]?.value || 0)
-    );
-    const revenueDelta = calculateDashboardTrend(
-      stats?.revenue?.today || 0,
-      Number(stats?.revenue?.trend7?.[stats?.revenue?.trend7?.length - 2]?.value || 0)
-    );
-    const visitorDelta = calculateDashboardTrend(
-      stats?.visitors?.today || 0,
-      Number(stats?.visitors?.trend7?.[stats?.visitors?.trend7?.length - 2]?.value || 0)
-    );
+    const recentInquiries = (Array.isArray(stats.recentMessages) ? stats.recentMessages : [])
+      .filter((item) => ["product_inquiry", "wholesale_inquiry"].includes(normalizeStatusValue(item.conversationType)))
+      .slice(0, 5);
 
     contentRoot.innerHTML = `
       <div class="admin-stack admin-dashboard-stack admin-dashboard-v3">
-        <section class="admin-dashboard-hero">
-          <div class="admin-dashboard-hero-copy">
-            <p class="admin-topbar-label">Dashboard</p>
-            <h2>Welcome back</h2>
-            <p>Monitor live customer activity, orders, revenue, and storefront traffic from one production dashboard.</p>
-          </div>
-          <div class="admin-dashboard-hero-meta">
-            <span>Updated</span>
-            <strong>${escapeHtml(formatDate(stats.generatedAt || new Date().toISOString()))}</strong>
-            <small>All KPI values are loaded from Supabase through the admin dashboard API.</small>
-          </div>
-        </section>
-
         <section class="admin-dashboard-kpis admin-dashboard-kpis-v3">
           ${renderDashboardKpiCard({
-            icon: "IQ",
-            title: "New Inquiries",
-            value: formatNumber(stats?.inquiries?.today || 0),
-            detail: `${formatNumber(stats?.inquiries?.total || 0)} total inquiries`,
-            trend: inquiryDelta,
-            comparisonLabel: "vs yesterday",
-          })}
-          ${renderDashboardKpiCard({
-            icon: "MS",
-            title: "Unread Messages",
-            value: formatNumber(stats?.unreadMessages?.total || 0),
-            detail: `${formatNumber(stats?.conversations?.today || 0)} new conversations today`,
-            trend: unreadDelta,
-            comparisonLabel: "in live inbox",
-          })}
-          ${renderDashboardKpiCard({
-            icon: "OR",
-            title: "Pending Orders",
-            value: formatNumber(stats?.orders?.pending || 0),
-            detail: `${formatNumber(stats?.orders?.today || 0)} orders created today`,
-            trend: pendingDelta,
-            comparisonLabel: "vs yesterday",
-          })}
-          ${renderDashboardKpiCard({
-            icon: "$",
             title: "Revenue",
-            value: formatMoney(stats?.revenue?.today || 0, stats?.revenue?.currency || "USD"),
-            detail: `This month ${formatMoney(stats?.revenue?.monthly || 0, stats?.revenue?.currency || "USD")}`,
-            trend: revenueDelta,
-            comparisonLabel: "vs yesterday",
+            value: formatMoney(stats?.revenue?.monthly || 0, stats?.revenue?.currency || "USD"),
+            detail: "This month",
           })}
           ${renderDashboardKpiCard({
-            icon: "VS",
+            title: "Orders",
+            value: formatNumber(stats?.orders?.total || 0),
+            detail: `${formatNumber(stats?.orders?.pending || 0)} pending`,
+          })}
+          ${renderDashboardKpiCard({
+            title: "Inquiries",
+            value: formatNumber(stats?.inquiries?.total || 0),
+            detail: "Total",
+          })}
+          ${renderDashboardKpiCard({
             title: "Visitors",
             value: formatNumber(stats?.visitors?.today || 0),
             detail: `${formatNumber(stats?.pageViews?.today || 0)} page views today`,
-            trend: visitorDelta,
-            comparisonLabel: "vs yesterday",
           })}
         </section>
 
@@ -2811,19 +2829,12 @@ async function renderDashboardSectionV2() {
           <article class="admin-panel admin-dashboard-panel">
             <div class="admin-panel-header admin-dashboard-panel-header">
               <div>
-                <h3>Revenue Trend</h3>
-                <p>Paid revenue based on confirmed payment statuses only.</p>
+                <h3>Revenue &amp; Orders Trend</h3>
               </div>
               <div class="admin-dashboard-segmented">
                 <button type="button" class="admin-dashboard-toggle ${revenueRange === 7 ? "is-active" : ""}" data-dashboard-range="7">7D</button>
                 <button type="button" class="admin-dashboard-toggle ${revenueRange === 30 ? "is-active" : ""}" data-dashboard-range="30">30D</button>
               </div>
-            </div>
-            <div class="admin-dashboard-metric-strip">
-              <div><span>Today</span><strong>${escapeHtml(formatMoney(stats?.revenue?.today || 0, stats?.revenue?.currency || "USD"))}</strong></div>
-              <div><span>7 Days</span><strong>${escapeHtml(formatMoney(stats?.revenue?.weekly || 0, stats?.revenue?.currency || "USD"))}</strong></div>
-              <div><span>Month</span><strong>${escapeHtml(formatMoney(stats?.revenue?.monthly || 0, stats?.revenue?.currency || "USD"))}</strong></div>
-              <div><span>Total</span><strong>${escapeHtml(formatMoney(stats?.revenue?.total || 0, stats?.revenue?.currency || "USD"))}</strong></div>
             </div>
             ${hasChartData(revenueTrend)
               ? buildLineChart(revenueTrend, {
@@ -2837,15 +2848,8 @@ async function renderDashboardSectionV2() {
           <article class="admin-panel admin-dashboard-panel">
             <div class="admin-panel-header admin-dashboard-panel-header">
               <div>
-                <h3>Visitor & Inquiry Trend</h3>
-                <p>Unique visitors and new inquiries over the last 7 days.</p>
+                <h3>Visitors &amp; Inquiries Trend</h3>
               </div>
-            </div>
-            <div class="admin-dashboard-metric-strip">
-              <div><span>Visitors</span><strong>${formatNumber(stats?.visitors?.today || 0)}</strong></div>
-              <div><span>Page Views</span><strong>${formatNumber(stats?.pageViews?.today || 0)}</strong></div>
-              <div><span>Inquiries</span><strong>${formatNumber(stats?.inquiries?.today || 0)}</strong></div>
-              <div><span>Conversations</span><strong>${formatNumber(stats?.conversations?.today || 0)}</strong></div>
             </div>
             ${hasSeriesChartData([
               { points: visitorTrend },
@@ -2877,41 +2881,7 @@ async function renderDashboardSectionV2() {
           <article class="admin-panel admin-dashboard-panel">
             <div class="admin-panel-header admin-dashboard-panel-header">
               <div>
-                <h3>Recent Messages</h3>
-                <p>Latest customer conversations requiring attention.</p>
-              </div>
-            </div>
-            ${
-              Array.isArray(stats.recentMessages) && stats.recentMessages.length
-                ? `
-                  <div class="admin-dashboard-list">
-                    ${stats.recentMessages
-                      .map(
-                        (item) => `
-                          <button class="admin-dashboard-row admin-dashboard-link" type="button" data-dashboard-conversation="${escapeHtml(item.id)}">
-                            <div class="admin-dashboard-row-main">
-                              <strong>${escapeHtml(item.customerName || item.email || "Customer")}</strong>
-                              <p>${escapeHtml(item.country || "No country")} · ${escapeHtml(item.lastMessageText || item.subject || "New conversation")}</p>
-                            </div>
-                            <div class="admin-dashboard-row-side">
-                              <span class="admin-pill ${getStatusClass(item.status)}">${escapeHtml(formatStatusLabel(item.status || "open"))}</span>
-                              <small>${escapeHtml(formatDate(item.lastMessageAt || item.createdAt))}</small>
-                            </div>
-                          </button>
-                        `
-                      )
-                      .join("")}
-                  </div>
-                `
-                : renderEmptyState("No messages yet", "New customer messages will appear here.")
-            }
-          </article>
-
-          <article class="admin-panel admin-dashboard-panel">
-            <div class="admin-panel-header admin-dashboard-panel-header">
-              <div>
                 <h3>Recent Orders</h3>
-                <p>Newest retail and wholesale order activity.</p>
               </div>
             </div>
             ${
@@ -2919,19 +2889,17 @@ async function renderDashboardSectionV2() {
                 ? `
                   <div class="admin-dashboard-list">
                     ${stats.recentOrders
+                      .slice(0, 5)
                       .map(
                         (order) => `
-                          <button class="admin-dashboard-row" type="button" data-dashboard-order="${escapeHtml(order.id)}">
+                          <button class="admin-dashboard-row admin-dashboard-link" type="button" data-dashboard-order="${escapeHtml(order.id)}">
                             <div class="admin-dashboard-row-main">
                               <strong>${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
                               <p>${escapeHtml(order.customerName || "Unknown customer")}</p>
                             </div>
                             <div class="admin-dashboard-row-side">
                               <span>${escapeHtml(formatMoney(order.totalAmount || order.subtotal || 0, order.currency || "USD"))}</span>
-                              <span class="admin-pill ${getStatusClass(order.orderStatus || order.status)}">${escapeHtml(
-                                formatStatusLabel(order.orderStatus || order.status || "pending")
-                              )}</span>
-                              <small>${escapeHtml(formatDate(order.createdAt))}</small>
+                              <span class="admin-pill ${getStatusClass(order.orderStatus || order.status)}">${escapeHtml(formatStatusLabel(order.orderStatus || order.status || "pending"))}</span>
                             </div>
                           </button>
                         `
@@ -2941,56 +2909,45 @@ async function renderDashboardSectionV2() {
                 `
                 : renderEmptyState("No orders yet", "New website orders will appear here.")
             }
-          </article>
-        </section>
-
-        <section class="admin-dashboard-intelligence">
-          <article class="admin-panel admin-dashboard-panel">
-            <div class="admin-panel-header admin-dashboard-panel-header">
-              <div>
-                <h3>Visitor Countries</h3>
-                <p>Top countries from recorded storefront traffic.</p>
-              </div>
-            </div>
-            ${buildDashboardBreakdownList(
-              stats.countries,
-              "No visitor countries yet",
-              "Country data will appear after public traffic is recorded."
-            )}
+            <button class="admin-dashboard-view-all" type="button" data-dashboard-view="orders">View all</button>
           </article>
 
           <article class="admin-panel admin-dashboard-panel">
             <div class="admin-panel-header admin-dashboard-panel-header">
               <div>
-                <h3>Traffic Sources</h3>
-                <p>Where visitors are arriving from right now.</p>
+                <h3>Recent Inquiries</h3>
               </div>
             </div>
-            ${buildDashboardBreakdownList(
-              stats.trafficSources,
-              "No traffic sources yet",
-              "Traffic source data will appear after recorded visits."
-            )}
+            ${
+              recentInquiries.length
+                ? `
+                  <div class="admin-dashboard-list">
+                    ${recentInquiries
+                      .map(
+                        (item) => `
+                          <button class="admin-dashboard-row" type="button" data-dashboard-conversation="${escapeHtml(item.id)}">
+                            <div class="admin-dashboard-row-main">
+                              <strong>${escapeHtml(item.customerName || item.email || "Customer")}</strong>
+                              <p>${escapeHtml(item.relatedProductName || item.subject || "General inquiry")}</p>
+                            </div>
+                            <div class="admin-dashboard-row-side">
+                              <small>${escapeHtml(formatDate(item.createdAt))}</small>
+                              <span class="admin-pill ${getStatusClass(item.status)}">${escapeHtml(
+                                formatStatusLabel(item.status || "open")
+                              )}</span>
+                            </div>
+                          </button>
+                        `
+                      )
+                      .join("")}
+                  </div>
+                `
+                : renderEmptyState("No recent inquiries", "New product and wholesale inquiries will appear here.")
+            }
+            <button class="admin-dashboard-view-all" type="button" data-dashboard-view="inquiries">View all</button>
           </article>
         </section>
 
-        <section class="admin-dashboard-operations">
-          <article class="admin-dashboard-op-card">
-            <span>System Status</span>
-            <strong class="admin-system-ok">Operational</strong>
-            <small>Dashboard API and admin services responding normally.</small>
-          </article>
-          <article class="admin-dashboard-op-card">
-            <span>Products</span>
-            <strong>${formatNumber(stats?.products?.published || 0)} Published</strong>
-            <small>${formatNumber(stats?.products?.total || 0)} products in the live catalog.</small>
-          </article>
-          <article class="admin-dashboard-op-card">
-            <span>Payments</span>
-            <strong>${stats?.pendingPayments?.total ? `${formatNumber(stats.pendingPayments.total)} Pending` : "No Pending"}</strong>
-            <small>${formatNumber(stats?.wholesaleOrders?.total || 0)} wholesale orders in total.</small>
-          </article>
-        </section>
       </div>
     `;
 
@@ -3010,6 +2967,13 @@ async function renderDashboardSectionV2() {
         await openAdminOrderDetail(button.dataset.dashboardOrder || null);
       })
     );
+    contentRoot.querySelectorAll("[data-dashboard-view]").forEach((button) =>
+      button.addEventListener("click", async () => {
+        adminState.activeSection = button.dataset.dashboardView === "orders" ? "orders" : "support";
+        syncAdminRoute("push");
+        await renderCurrentSection();
+      })
+    );
   } catch (error) {
     contentRoot.innerHTML = `
       <section class="admin-panel">
@@ -3024,753 +2988,47 @@ async function renderDashboardSectionV2() {
   }
 }
 
-const renderOrdersSectionLegacy = async () => {
-  const orders = await fetchAdminOrders();
-  const query = adminState.orders.query.trim().toLowerCase();
-  const filtered = orders.filter((inquiry) => {
-    const matchesStatus =
-      adminState.orders.status === "all" ? true : inquiry.status === adminState.orders.status;
-
-    if (!matchesStatus) {
-      return false;
-    }
-
-    if (!query) {
-      return true;
-    }
-
-    const haystack = [
-      inquiry.customerName,
-      inquiry.country,
-      inquiry.email,
-      inquiry.phone,
-      inquiry.productName,
-      inquiry.message,
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    return haystack.includes(query);
-  });
-
-  if (!filtered.some((item) => item.id === adminState.orders.selectedId)) {
-    adminState.orders.selectedId = filtered[0]?.id || null;
-  }
-  syncAdminRoute("replace");
-
-  const selectedSummary = filtered.find((item) => item.id === adminState.orders.selectedId) || null;
-  const [selected, selectedPayments] = selectedSummary
-    ? await Promise.all([
-      fetchAdminOrder(selectedSummary.id),
-      fetchAdminOrderPayments(selectedSummary.id),
-    ])
-    : [null, []];
-  if (!selectedSummary) {
-    adminState.orders.timeline = {
-      orderId: null,
-      loading: false,
-      error: "",
-      items: [],
-      requestId: 0,
-    };
-  } else if (
-    adminState.orders.timeline.orderId !== selectedSummary.id &&
-    !adminState.orders.timeline.loading
-  ) {
-    const nextRequestId = Date.now();
-    adminState.orders.timeline = {
-      orderId: selectedSummary.id,
-      loading: true,
-      error: "",
-      items: [],
-      requestId: nextRequestId,
-    };
-    void loadAdminOrderTimeline(selectedSummary.id);
-  }
-  const timelineState =
-    selectedSummary && adminState.orders.timeline.orderId === selectedSummary.id
-      ? adminState.orders.timeline
-      : {
-          orderId: selectedSummary?.id || null,
-          loading: Boolean(selectedSummary),
-          error: "",
-          items: [],
-          requestId: 0,
-        };
-  const paymentHistory = selected ? buildOrderPaymentHistory(selected, selectedPayments) : [];
-  const orderStatusOptions =
-    (selected?.purchaseMode || "") === "wholesale" ? WHOLESALE_ORDER_STATUSES : RETAIL_ORDER_STATUSES;
-
-  contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <section class="admin-toolbar">
-        <label class="admin-search-field">
-          <span>Search</span>
-          <input
-            id="orders-search"
-            class="admin-search-input"
-            type="search"
-            placeholder="Search customer, product, country, email"
-            value="${escapeHtml(adminState.orders.query)}"
-          >
-        </label>
-        <div class="admin-filter-tabs">
-          ${["all", ...INTERNAL_ORDER_STATUSES]
-            .map(
-              (status) => `
-                <button
-                  type="button"
-                  class="admin-filter-chip ${adminState.orders.status === status ? "is-active" : ""}"
-                  data-order-filter="${status}"
-                >
-                  ${escapeHtml(status === "all" ? "All" : status)}
-                </button>
-              `
-            )
-            .join("")}
-        </div>
-      </section>
-
-      <div class="admin-split-layout">
-        <section class="admin-panel admin-list-panel">
-          <div class="admin-panel-header">
-            <div>
-              <h3>All Orders</h3>
-              <p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p>
-            </div>
-          </div>
-          ${
-            filtered.length
-              ? `
-                <div class="admin-order-list">
-                  ${filtered
-                    .map(
-                      (inquiry) => `
-                        <button
-                          type="button"
-                          class="admin-order-row ${inquiry.id === selectedSummary?.id ? "is-active" : ""}"
-                          data-order-id="${escapeHtml(inquiry.id)}"
-                        >
-                          <div class="admin-order-row-main">
-                            <strong>${escapeHtml(inquiry.customerName || "Unknown Visitor")}</strong>
-                            <p>${escapeHtml(inquiry.productName || "General Inquiry")}</p>
-                          </div>
-                          <div class="admin-order-row-meta">
-                            <span>${escapeHtml(inquiry.orderNumber || inquiry.orderId || inquiry.id)}</span>
-                            <span class="admin-pill ${getStatusClass(inquiry.status)}">${escapeHtml(formatStatusLabel(
-                              inquiry.status
-                            ))}</span>
-                          </div>
-                        </button>
-                      `
-                    )
-                    .join("")}
-                </div>
-              `
-              : renderEmptyState("No inquiries yet", "Filtered inquiry results will appear here.")
-          }
-        </section>
-
-        <section class="admin-panel admin-detail-panel">
-          ${
-            selected
-              ? `
-                <div class="admin-panel-header">
-                  <div>
-                    <h3>${escapeHtml(selected.customerName || "Order Detail")}</h3>
-                    <p>${escapeHtml(selected.orderNumber || selected.orderId || selected.id || "-")}</p>
-                  </div>
-                  <span class="admin-pill ${getStatusClass(selected.status)}">${escapeHtml(formatStatusLabel(
-                    selected.status
-                  ))}</span>
-                </div>
-
-                <form class="admin-form-stack" id="order-detail-form">
-                  <input type="hidden" name="id" value="${escapeHtml(selected.id)}">
-                  <div class="admin-kv-grid">
-                    <div class="admin-kv-item"><span>Order Number</span><strong>${escapeHtml(
-                      selected.orderNumber || selected.orderId || selected.id || "-"
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Name</span><strong>${escapeHtml(selected.customerName || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Country</span><strong>${escapeHtml(selected.country || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Email</span><strong>${escapeHtml(selected.email || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Phone</span><strong>${escapeHtml(selected.phone || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Mode</span><strong>${escapeHtml(formatStatusLabel(
-                      selected.purchaseMode || "-"
-                    ))}</strong></div>
-                    <div class="admin-kv-item"><span>Source</span><strong>${escapeHtml(selected.source || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Product</span><strong>${escapeHtml(selected.productName || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Quantity</span><strong>${escapeHtml(selected.quantity || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Unit Price</span><strong>${escapeHtml(selected.unitPrice || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Subtotal</span><strong>${escapeHtml(selected.subtotal || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Total</span><strong>${escapeHtml(selected.totalAmount || selected.subtotal || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>MOQ</span><strong>${escapeHtml(selected.moq || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Budget</span><strong>${escapeHtml(selected.budget || "-")}</strong></div>
-                    <div class="admin-kv-item"><span>Lead Time</span><strong>${escapeHtml(
-                      selected.shippingCycle || selected.leadTime || "-"
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Order Status</span><strong>${escapeHtml(
-                      formatStatusLabel(selected.orderStatus || "-")
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Payment Status</span><strong>${escapeHtml(
-                      formatStatusLabel(selected.paymentStatus || "-")
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Shipping Status</span><strong>${escapeHtml(
-                      formatStatusLabel(selected.shippingStatus || "-")
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Deposit</span><strong>${escapeHtml(
-                      selected.depositPercentage || "-"
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Deposit Amount</span><strong>${escapeHtml(
-                      selected.depositAmount || "-"
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Balance Amount</span><strong>${escapeHtml(
-                      selected.balanceAmount || "-"
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Payment Terms</span><strong>${escapeHtml(
-                      selected.paymentTerms || "-"
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Created</span><strong>${escapeHtml(
-                      formatDate(selected.createdAt)
-                    )}</strong></div>
-                    <div class="admin-kv-item"><span>Updated</span><strong>${escapeHtml(
-                      formatDate(selected.updatedAt)
-                    )}</strong></div>
-                  </div>
-
-                  <div class="admin-subsection">
-                    <h4>Addresses</h4>
-                    <div class="admin-kv-grid">
-                      <div class="admin-kv-item"><span>Shipping Address</span><strong>${escapeHtml(
-                        selected.shippingAddress || "-"
-                      )}</strong></div>
-                      <div class="admin-kv-item"><span>Billing Address</span><strong>${escapeHtml(
-                        selected.billingAddress || selected.shippingAddress || "-"
-                      )}</strong></div>
-                    </div>
-                  </div>
-
-                  <div class="admin-subsection">
-                    <h4>Item Snapshots</h4>
-                    ${
-                      Array.isArray(selected.items) && selected.items.length
-                        ? `
-                          <div class="admin-history-list">
-                            ${selected.items
-                              .map(
-                                (item) => `
-                                  <article class="admin-history-item">
-                                    <div>
-                                      <strong>${escapeHtml(item.productName || selected.productName || "-")}</strong>
-                                      <p>${escapeHtml(
-                                        `${item.quantity || selected.quantity || "-"} × ${item.unitPrice || selected.unitPrice || "-"}`
-                                      )}</p>
-                                    </div>
-                                    <span>${escapeHtml(item.lineTotal || selected.subtotal || "-")}</span>
-                                  </article>
-                                `
-                              )
-                              .join("")}
-                          </div>
-                        `
-                        : renderEmptyState("No items saved", "Order item snapshots will appear here.")
-                    }
-                  </div>
-
-                  <div class="admin-subsection">
-                    <h4>Payment History</h4>
-                    ${
-                      paymentHistory.length
-                        ? `
-                          <div class="admin-history-list">
-                            ${paymentHistory
-                              .map(
-                                (item) => `
-                                  <article class="admin-history-item ${item.placeholder ? "is-placeholder" : ""}">
-                                    <div>
-                                      <strong>${item.label}</strong>
-                                    </div>
-                                    <span class="admin-pill ${item.placeholder ? "" : getStatusClass(item.status)}">${escapeHtml(
-                                      item.status
-                                    )}</span>
-                                  </article>
-                                `
-                              )
-                              .join("")}
-                          </div>
-                        `
-                        : renderEmptyState("No payment history", "Payment milestones for this order will appear here.")
-                    }
-                  </div>
-
-                  <div class="admin-subsection">
-                    <h4>Order Timeline</h4>
-                    ${
-                      timelineState.loading
-                        ? '<p class="admin-muted">Loading timeline...</p>'
-                        : timelineState.error
-                          ? `<p class="admin-muted admin-error-text">Failed to load timeline: ${escapeHtml(
-                              timelineState.error
-                            )}</p>`
-                          : timelineState.items.length
-                        ? `
-                          <div class="admin-timeline-list">
-                            ${timelineState.items
-                              .map(
-                                (event) => `
-                                  <article class="admin-timeline-item">
-                                    <span class="admin-timeline-dot" aria-hidden="true"></span>
-                                    <div class="admin-timeline-content">
-                                      <strong>${escapeHtml(event.title || formatStatusLabel(event.eventType || "-"))}</strong>
-                                      <p>${escapeHtml(event.description || "No description provided.")}</p>
-                                      <div class="admin-timeline-meta">
-                                        <span class="admin-timeline-type">${escapeHtml(event.eventType || "-")}</span>
-                                        <small>${escapeHtml(formatDate(event.createdAt))}</small>
-                                      </div>
-                                    </div>
-                                  </article>
-                                `
-                              )
-                              .join("")}
-                          </div>
-                        `
-                        : renderEmptyState("No timeline events yet", "Order events will appear here when the API returns them.")
-                    }
-                  </div>
-
-                  <label class="full">
-                    Customer Message
-                    <textarea readonly>${escapeHtml(selected.message || "-")}</textarea>
-                  </label>
-
-                  <label>
-                    Processing Status
-                    <select name="status">
-                      ${INTERNAL_ORDER_STATUSES.map(
-                        (status) => `
-                          <option value="${status}" ${selected.status === status ? "selected" : ""}>${formatStatusLabel(status)}</option>
-                        `
-                      ).join("")}
-                    </select>
-                  </label>
-
-                  <label>
-                    Order Status
-                    <select name="orderStatus">
-                      ${orderStatusOptions
-                        .map(
-                          (status) => `
-                            <option value="${status}" ${selected.orderStatus === status ? "selected" : ""}>${formatStatusLabel(status)}</option>
-                          `
-                        )
-                        .join("")}
-                    </select>
-                  </label>
-
-                  <label>
-                    Payment Status
-                    <select name="paymentStatus">
-                      ${PAYMENT_STATUSES
-                        .map(
-                          (status) => `
-                            <option value="${status}" ${selected.paymentStatus === status ? "selected" : ""}>${formatStatusLabel(status)}</option>
-                          `
-                        )
-                        .join("")}
-                    </select>
-                  </label>
-
-                  <label>
-                    Shipping Status
-                    <select name="shippingStatus">
-                      ${SHIPPING_STATUSES
-                        .map(
-                          (status) => `
-                            <option value="${status}" ${selected.shippingStatus === status ? "selected" : ""}>${formatStatusLabel(status)}</option>
-                          `
-                        )
-                        .join("")}
-                    </select>
-                  </label>
-
-                  <label class="full">
-                    Admin Note
-                    <textarea name="adminNote" rows="5" placeholder="Internal follow-up note">${escapeHtml(
-                      selected.adminNote || ""
-                    )}</textarea>
-                  </label>
-
-                  <div class="admin-actions-inline">
-                    <button class="admin-primary-button" type="submit">Save</button>
-                    <button class="admin-secondary-button" type="button" id="order-status-toggle">
-                      Mark ${selected.status === "processed" ? "Unprocessed" : "Processed"}
-                    </button>
-                    <button class="admin-danger-button" type="button" id="order-delete-button">Delete</button>
-                  </div>
-                </form>
-              `
-              : renderEmptyState("No inquiries yet", "Select an inquiry from the list to inspect details.")
-          }
-        </section>
-      </div>
-    </div>
-  `;
-
-  document.querySelector("#orders-search")?.addEventListener("input", async (event) => {
-    adminState.orders.query = event.target.value;
-    await renderCurrentSection();
-  });
-
-  contentRoot.querySelectorAll("[data-order-filter]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      adminState.orders.status = button.dataset.orderFilter || "all";
-      await renderCurrentSection();
-    });
-  });
-
-  contentRoot.querySelectorAll("[data-order-id]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      adminState.orders.selectedId = button.dataset.orderId || null;
-      await renderCurrentSection();
-    });
-  });
-
-  document.querySelector("#order-detail-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    await updateAdminOrder(formData.get("id"), {
-      status: formData.get("status"),
-      orderStatus: formData.get("orderStatus"),
-      paymentStatus: formData.get("paymentStatus"),
-      shippingStatus: formData.get("shippingStatus"),
-      adminNote: formData.get("adminNote"),
-    });
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#order-status-toggle")?.addEventListener("click", async () => {
-    if (!selected?.id) {
-      return;
-    }
-
-    await updateAdminOrder(selected.id, {
-      status: selected.status === "processed" ? "unprocessed" : "processed",
-    });
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#order-delete-button")?.addEventListener("click", async () => {
-    if (!selected?.id) {
-      return;
-    }
-
-    if (!window.confirm("Delete this inquiry?")) {
-      return;
-    }
-
-    await deleteAdminOrder(selected.id);
-    adminState.orders.selectedId = null;
-    await renderCurrentSection();
-  });
-};
-
-const renderPaymentsTableLegacy = (payments) => `
-  <div class="admin-table-shell">
-    <table class="admin-table">
-      <thead>
-        <tr>
-          <th>Order ID</th>
-          <th>Customer</th>
-          <th>Product</th>
-          <th>Amount</th>
-          <th>Currency</th>
-          <th>Payment Method</th>
-          <th>Payment Type</th>
-          <th>Status</th>
-          <th>Created Time</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${payments
-          .map(
-            (payment) => `
-              <tr>
-                <td>${escapeHtml(payment.orderId || "-")}</td>
-                <td>${escapeHtml(payment.customer || "-")}</td>
-                <td>${escapeHtml(payment.product || "-")}</td>
-                <td>${escapeHtml(formatMoney(payment.amount, payment.currency))}</td>
-                <td>${escapeHtml(payment.currency || "USD")}</td>
-                <td>${escapeHtml(payment.paymentMethod || "-")}</td>
-                <td>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</td>
-                <td><span class="admin-pill ${getStatusClass(payment.status)}">${escapeHtml(
-                  formatPaymentStatusLabel(payment.status)
-                )}</span></td>
-                <td>${escapeHtml(formatDate(payment.createdAt))}</td>
-                <td>
-                  <button class="admin-secondary-button" type="button" data-payment-view="${escapeHtml(payment.id)}">View</button>
-                </td>
-              </tr>
-            `
-          )
-          .join("")}
-      </tbody>
-    </table>
-  </div>
-`;
-
-const renderPaymentDetailSectionLegacy = async () => {
-  const paymentId = adminState.payments.selectedId;
-  const payment = paymentId ? await fetchAdminPayment(paymentId) : null;
-
-  if (!payment) {
-    adminState.payments.mode = "list";
-    adminState.payments.selectedId = null;
-    await renderCurrentSection();
-    return;
-  }
-
-  const [order, orderPayments] = await Promise.all([
-    fetchAdminOrder(payment.orderId),
-    fetchAdminOrderPayments(payment.orderId),
-  ]);
-
-  contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <div class="admin-page-head">
-        <div>
-          <h2>Payment Detail</h2>
-          <p>Review the linked order and update payment status.</p>
-        </div>
-      </div>
-
-      <div class="admin-payment-detail-layout">
-        <div class="admin-payment-detail-column">
-          <section class="admin-panel admin-payment-card">
-            <h4>Payment Information</h4>
-            <div class="admin-kv-grid">
-              <div class="admin-kv-item"><span>Payment ID</span><strong>${escapeHtml(payment.paymentId || payment.id)}</strong></div>
-              <div class="admin-kv-item"><span>Payment Type</span><strong>${escapeHtml(
-                formatPaymentTypeLabel(payment.paymentType)
-              )}</strong></div>
-              <div class="admin-kv-item"><span>Amount</span><strong>${escapeHtml(
-                formatMoney(payment.amount, payment.currency)
-              )}</strong></div>
-              <div class="admin-kv-item"><span>Currency</span><strong>${escapeHtml(payment.currency || "USD")}</strong></div>
-              <div class="admin-kv-item"><span>Payment Method</span><strong>${escapeHtml(payment.paymentMethod || "-")}</strong></div>
-              <div class="admin-kv-item"><span>Status</span><strong>${escapeHtml(
-                formatPaymentStatusLabel(payment.status)
-              )}</strong></div>
-            </div>
-          </section>
-
-          <section class="admin-panel admin-payment-card">
-            <h4>Order Information</h4>
-            <div class="admin-kv-grid">
-              <div class="admin-kv-item"><span>Order ID</span><strong>${escapeHtml(order?.orderId || payment.orderId || "-")}</strong></div>
-              <div class="admin-kv-item"><span>Product</span><strong>${escapeHtml(order?.productName || payment.product || "-")}</strong></div>
-              <div class="admin-kv-item"><span>Mode</span><strong>${escapeHtml(order?.purchaseMode || payment.orderType || "-")}</strong></div>
-              <div class="admin-kv-item"><span>Order Status</span><strong>${escapeHtml(order?.orderStatus || "-")}</strong></div>
-            </div>
-          </section>
-        </div>
-
-        <div class="admin-payment-detail-column">
-          <section class="admin-panel admin-payment-card">
-            <h4>Customer</h4>
-            <div class="admin-kv-grid">
-              <div class="admin-kv-item"><span>Name</span><strong>${escapeHtml(order?.customerName || payment.customer || "-")}</strong></div>
-              <div class="admin-kv-item"><span>Email</span><strong>${escapeHtml(order?.email || payment.customerEmail || "-")}</strong></div>
-              <div class="admin-kv-item"><span>Phone</span><strong>${escapeHtml(order?.phone || payment.customerPhone || "-")}</strong></div>
-              <div class="admin-kv-item"><span>Country</span><strong>${escapeHtml(order?.country || "-")}</strong></div>
-            </div>
-          </section>
-
-          <section class="admin-panel admin-payment-card">
-            <h4>Billing Address</h4>
-            <div class="admin-note-card">${escapeHtml(payment.billingAddress || order?.shippingAddress || "-")}</div>
-          </section>
-
-          <section class="admin-panel admin-payment-card">
-            <h4>Payment Timeline</h4>
-            <div class="admin-history-list">
-              <article class="admin-history-item">
-                <div>
-                  <strong>Created</strong>
-                  <p>${escapeHtml(formatDate(payment.createdAt))}</p>
-                </div>
-              </article>
-              <article class="admin-history-item">
-                <div>
-                  <strong>Last Updated</strong>
-                  <p>${escapeHtml(formatDate(payment.updatedAt))}</p>
-                </div>
-              </article>
-              ${
-                payment.paidAt
-                  ? `
-                    <article class="admin-history-item">
-                      <div>
-                        <strong>Paid</strong>
-                        <p>${escapeHtml(formatDate(payment.paidAt))}</p>
-                      </div>
-                    </article>
-                  `
-                  : ""
-              }
-            </div>
-          </section>
-        </div>
-
-        <div class="admin-payment-detail-column admin-payment-detail-column-sticky">
-          <div class="admin-payment-sticky-stack">
-            <section class="admin-panel admin-payment-card">
-              <h4>Update Status</h4>
-              <form class="admin-form-stack" id="payment-detail-form">
-                <input type="hidden" name="id" value="${escapeHtml(payment.id)}">
-                <label>
-                  Status
-                  <select name="status">
-                    <option value="pending" ${payment.status === "pending" ? "selected" : ""}>Pending</option>
-                    <option value="paid" ${payment.status === "paid" ? "selected" : ""}>Paid</option>
-                    <option value="failed" ${payment.status === "failed" ? "selected" : ""}>Failed</option>
-                    <option value="refunded" ${payment.status === "refunded" ? "selected" : ""}>Refunded</option>
-                  </select>
-                </label>
-                <button class="admin-primary-button" type="submit">Save Status</button>
-              </form>
-            </section>
-
-            <section class="admin-panel admin-payment-card">
-              <h4>Order Payment History</h4>
-              <div class="admin-history-list">
-                ${buildOrderPaymentHistory(order, orderPayments)
-                  .map(
-                    (item) => `
-                      <article class="admin-history-item ${item.placeholder ? "is-placeholder" : ""}">
-                        <div>
-                          <strong>${item.label}</strong>
-                        </div>
-                        <span class="admin-pill ${item.placeholder ? "" : getStatusClass(item.status)}">${escapeHtml(
-                          item.status
-                        )}</span>
-                      </article>
-                    `
-                  )
-                  .join("")}
-              </div>
-            </section>
-
-            <section class="admin-panel admin-payment-card">
-              <h4>Actions</h4>
-              <div class="admin-actions-stack">
-                <button class="admin-secondary-button" type="button" id="payments-view-order-button">View Order</button>
-                <button class="admin-secondary-button" type="button" id="payments-back-button">Back to Payments</button>
-              </div>
-            </section>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  document.querySelector("#payments-back-button")?.addEventListener("click", async () => {
-    adminState.payments.mode = "list";
-    adminState.payments.selectedId = null;
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#payments-view-order-button")?.addEventListener("click", async () => {
-    adminState.activeSection = "orders";
-    adminState.orders.selectedId = payment.orderId;
-    renderAdminNavV4();
-    updateTitle();
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#payment-detail-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const status = String(formData.get("status") || "pending");
-
-    const updatedPayment = await updateAdminPayment(payment.id, {
-      status,
-      paidAt: status === "paid" ? new Date().toISOString() : "",
-    });
-
-    if (order?.id) {
-      const nextPayments = orderPayments.map((item) => (item.id === updatedPayment.id ? updatedPayment : item));
-      const nextPaymentStatus = deriveOrderPaymentStatusFromPayments(order, nextPayments);
-      await updateAdminOrderPaymentStatus(order.id, nextPaymentStatus);
-    }
-
-    await renderCurrentSection();
-  });
-};
-
-const renderPaymentsListSectionLegacy = async () => {
-  const payments = await fetchAdminPayments();
-
-  contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <section class="admin-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Payment Records</h3>
-            <p>All customer payment records linked to orders.</p>
-          </div>
-        </div>
-        ${
-          payments.length
-            ? renderPaymentsTable(payments)
-            : renderEmptyState("No payment records", "Payment records will appear here after customers confirm a payment method.")
-        }
-      </section>
-    </div>
-  `;
-
-  contentRoot.querySelectorAll("[data-payment-view]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      adminState.payments.mode = "detail";
-      adminState.payments.selectedId = button.dataset.paymentView || null;
-      await renderCurrentSection();
-    });
-  });
-};
-
-const renderPaymentsSectionLegacy = async () => {
-  if (adminState.payments.mode === "detail" && adminState.payments.selectedId) {
-    await renderPaymentDetailSection();
-    return;
-  }
-
-  await renderPaymentsListSection();
-};
-
 const renderOrderListMarkup = (orders) =>
   orders.length
     ? `
-      <div class="admin-order-list">
-        ${orders
-          .map((order) => {
-            const displayStatus = getOrderListStatusLabel(order);
-            return `
-              <button type="button" class="admin-order-card" data-order-id="${escapeHtml(order.id)}">
-                <div class="admin-order-card-head">
-                  <div class="admin-order-card-copy">
-                    <strong>${escapeHtml(order.customerName || "Unknown Customer")}</strong>
-                    <span class="admin-mono">${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</span>
-                  </div>
-                  <span class="admin-pill ${getStatusClass(normalizeStatusValue(displayStatus))}">${escapeHtml(displayStatus)}</span>
-                </div>
-                <div class="admin-order-card-meta">
-                  <span>${escapeHtml(order.totalAmount || order.subtotal || "-")}</span>
-                  <span>${escapeHtml(formatDate(order.createdAt))}</span>
-                </div>
-              </button>
-            `;
-          })
-          .join("")}
+      <div class="admin-table-shell admin-commerce-table-shell">
+        <table class="admin-table admin-commerce-table admin-orders-table">
+          <thead>
+            <tr>
+              <th>Order #</th>
+              <th>Customer</th>
+              <th>Items</th>
+              <th>Total</th>
+              <th>Order Status</th>
+              <th>Payment Status</th>
+              <th>Fulfillment</th>
+              <th>Created</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${orders
+              .map(
+                (order) => `
+                  <tr>
+                    <td class="admin-mono admin-table-strong">${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</td>
+                    <td>
+                      <strong>${escapeHtml(order.customerName || "Unknown Customer")}</strong>
+                      <small>${escapeHtml(formatStatusLabel(order.purchaseMode || "retail"))}</small>
+                    </td>
+                    <td>${escapeHtml(`${getAdminOrderItemCount(order)} item${getAdminOrderItemCount(order) === 1 ? "" : "s"}`)}</td>
+                    <td class="admin-table-strong">${escapeHtml(order.totalAmount || order.subtotal || "-")}</td>
+                    <td><span class="admin-pill ${getAdminPillStatusClass(order.orderStatus)}">${escapeHtml(formatStatusLabel(order.orderStatus || "pending"))}</span></td>
+                    <td><span class="admin-pill ${getAdminPillStatusClass(order.paymentStatus)}">${escapeHtml(formatPaymentStatusLabel(order.paymentStatus || "unpaid"))}</span></td>
+                    <td><span class="admin-pill ${getAdminPillStatusClass(order.shippingStatus)}">${escapeHtml(formatStatusLabel(order.shippingStatus || "not_started"))}</span></td>
+                    <td>${escapeHtml(formatShortDate(order.createdAt))}</td>
+                    <td><button class="admin-secondary-button admin-table-action" type="button" data-order-id="${escapeHtml(order.id)}">View</button></td>
+                  </tr>
+                `
+              )
+              .join("")}
+          </tbody>
+        </table>
       </div>
     `
     : renderEmptyState("No orders yet", "Order records will appear here once customers place orders.");
@@ -3796,13 +3054,8 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
           image: selected.productImage || selected.image || "",
         },
       ];
-  const primaryPayment = Array.isArray(selectedPayments) && selectedPayments.length
-    ? selectedPayments
-        .slice()
-        .reverse()
-        .find((payment) => payment.paymentType !== "refund" && ["pending", "awaiting_payment", "payment_submitted"].includes(normalizeStatusValue(payment.status)))
-        || selectedPayments[0]
-    : null;
+  const paymentSummary = getAdminOrderPaymentSummary(selected, selectedPayments);
+  const summaryCurrency = selected.currency || selectedPayments?.[0]?.currency || "USD";
 
   return `
     <div class="admin-stack">
@@ -3819,9 +3072,10 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
               <p class="admin-order-overline">Order</p>
               <h3>${escapeHtml(selected.orderNumber || selected.orderId || selected.id || "-")}</h3>
               <div class="admin-order-header-subline">
-                <span>${escapeHtml(selected.customerName || "-")}</span>
-                <span>${escapeHtml(selected.totalAmount || selected.subtotal || "-")}</span>
-                <span>${escapeHtml(formatDate(selected.createdAt))}</span>
+                <span>Created ${escapeHtml(formatDate(selected.createdAt))}</span>
+                <span>${escapeHtml(formatStatusLabel(selected.purchaseMode || "retail"))}</span>
+                <span>${escapeHtml(summaryCurrency)}</span>
+                <strong>${escapeHtml(selected.totalAmount || selected.subtotal || "-")}</strong>
               </div>
             </div>
             <div class="admin-order-header-badges">
@@ -3926,8 +3180,8 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
                         <td>
                           <div class="admin-order-item-cell">
                             ${
-                              item.image
-                                ? `<img class="admin-order-item-thumb" src="${escapeHtml(item.image)}" alt="${escapeHtml(
+                              item.image || item.productImage
+                                ? `<img class="admin-order-item-thumb" src="${escapeHtml(item.image || item.productImage)}" alt="${escapeHtml(
                                     item.productName || selected.productName || "Product image"
                                   )}">`
                                 : ""
@@ -3948,7 +3202,11 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
           </div>
           <div class="admin-order-totals">
             <div class="admin-order-total-row"><span>Subtotal</span><strong>${escapeHtml(selected.subtotal || "-")}</strong></div>
-            <div class="admin-order-total-row"><span>Shipping</span><strong>${escapeHtml(selected.shippingAmount || "$0.00")}</strong></div>
+            ${
+              hasNonZeroAmount(selected.discountAmount)
+                ? `<div class="admin-order-total-row"><span>Discount</span><strong>${escapeHtml(selected.discountAmount || "$0.00")}</strong></div>`
+                : ""
+            }
             <div class="admin-order-total-row"><span>Total</span><strong>${escapeHtml(
               selected.totalAmount || selected.subtotal || "-"
             )}</strong></div>
@@ -3957,96 +3215,18 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
 
         <section class="admin-subsection">
           <div class="admin-section-head">
-            <h4>Payment</h4>
-            <button class="admin-secondary-button" type="button" id="order-view-all-payments">Open Payments</button>
+            <h4>Payment Summary</h4>
+            <button class="admin-secondary-button" type="button" id="order-view-all-payments">View Payments</button>
           </div>
-          <div class="admin-info-grid admin-info-grid-tight">
-            <article class="admin-info-card">
-              <h5>Payment Overview</h5>
-              <dl class="admin-description-grid">
-                <div><dt>Payment Provider</dt><dd>${escapeHtml(
-                  formatPaymentProviderLabel(primaryPayment?.paymentProvider, primaryPayment?.paymentMethod)
-                )}</dd></div>
-                <div><dt>Payment Method</dt><dd>${escapeHtml(primaryPayment?.paymentMethod || "-")}</dd></div>
-                <div><dt>Settlement Channel</dt><dd>${escapeHtml(primaryPayment?.settlementChannel || "-")}</dd></div>
-                <div><dt>Transaction ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(
-                  primaryPayment?.transactionId || primaryPayment?.paypalCaptureId || primaryPayment?.providerReference || primaryPayment?.paymentId || primaryPayment?.id || "-"
-                )}</dd></div>
-                <div><dt>Bank Reference</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(
-                  primaryPayment?.transactionId || primaryPayment?.providerReference || "-"
-                )}</dd></div>
-                <div><dt>PayPal Order ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(primaryPayment?.paypalOrderId || "-")}</dd></div>
-                <div class="full"><dt>Payment Proof</dt><dd>${
-                  primaryPayment?.paymentProofUrl
-                    ? `
-                      <div class="admin-payment-proof-preview">
-                        <a href="${escapeHtml(primaryPayment.paymentProofUrl)}" target="_blank" rel="noreferrer">
-                          <img src="${escapeHtml(primaryPayment.paymentProofUrl)}" alt="Payment proof preview">
-                        </a>
-                        <a href="${escapeHtml(primaryPayment.paymentProofUrl)}" target="_blank" rel="noreferrer">Open full image</a>
-                      </div>
-                    `
-                    : "-"
-                }</dd></div>
-                <div><dt>Payment Time</dt><dd>${escapeHtml(primaryPayment?.paidAt ? formatDate(primaryPayment.paidAt) : "-")}</dd></div>
-                <div><dt>Amount</dt><dd>${escapeHtml(
-                  primaryPayment ? formatMoney(primaryPayment.amount, primaryPayment.currency) : selected.totalAmount || selected.subtotal || "-"
-                )}</dd></div>
-                <div>
-                  <dt>Status</dt>
-                  <dd>
-                    <select name="paymentStatus">
-                      ${PAYMENT_STATUSES.map(
-                        (status) => `
-                          <option value="${status}" ${selected.paymentStatus === status ? "selected" : ""}>${formatStatusLabel(status)}</option>
-                        `
-                      ).join("")}
-                    </select>
-                  </dd>
-                </div>
-              </dl>
-              <div class="admin-actions-inline">
-                <button class="admin-secondary-button" type="submit">Save Payment Status</button>
-                ${
-                  primaryPayment?.id && isBankTransferPaymentRecord(primaryPayment)
-                    ? `
-                      <button class="admin-primary-button" type="button" id="order-confirm-bank-transfer-button">Confirm Payment</button>
-                      <button class="admin-secondary-button" type="button" id="order-reject-bank-transfer-button">Reject Payment</button>
-                    `
-                    : ""
-                }
-              </div>
-            </article>
-            <article class="admin-info-card">
-              <h5>Payment Records</h5>
-              ${
-                Array.isArray(selectedPayments) && selectedPayments.length
-                  ? `
-                    <div class="admin-linked-record-list">
-                      ${selectedPayments
-                        .map(
-                          (payment) => `
-                            <article class="admin-linked-record-row admin-static-record-row">
-                              <div class="admin-linked-record-main">
-                                <strong>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</strong>
-                                <p>${escapeHtml(payment.paymentMethod || "Payment method not set")}</p>
-                              </div>
-                              <div class="admin-linked-record-side">
-                                <span>${escapeHtml(formatMoney(payment.amount, payment.currency))}</span>
-                                <span class="admin-pill ${getStatusClass(payment.status)}">${escapeHtml(
-                                  formatPaymentStatusLabel(payment.status)
-                                )}</span>
-                              </div>
-                            </article>
-                          `
-                        )
-                        .join("")}
-                    </div>
-                  `
-                  : renderEmptyState("No payment records yet", "Payment records linked to this order will appear here.")
-              }
-            </article>
-          </div>
+          <article class="admin-info-card admin-order-payment-summary">
+            <dl class="admin-description-grid">
+              <div><dt>Payment Status</dt><dd><span class="admin-pill ${getAdminPillStatusClass(selected.paymentStatus)}">${escapeHtml(formatPaymentStatusLabel(selected.paymentStatus || "unpaid"))}</span></dd></div>
+              <div><dt>Paid Amount</dt><dd>${escapeHtml(formatMoney(paymentSummary.paidAmount, summaryCurrency))}</dd></div>
+              <div><dt>Balance Due</dt><dd>${escapeHtml(formatMoney(paymentSummary.balanceDue, summaryCurrency))}</dd></div>
+              <div><dt>Payment Method</dt><dd>${escapeHtml(paymentSummary.methods.join(", ") || "-")}</dd></div>
+            </dl>
+            ${paymentSummary.pendingBankTransfer ? '<p class="admin-payment-attention">Bank Transfer pending verification. Review the payment record in Payments.</p>' : ""}
+          </article>
         </section>
 
         <section class="admin-subsection">
@@ -4175,49 +3355,6 @@ const renderOrderDetailMarkup = ({ selected, selectedPayments, timelineState }) 
 };
 
 const bindOrderDetailInteractions = (selected) => {
-  const reviewBankTransferPayment = async (nextStatus) => {
-    if (!selected?.id) {
-      return;
-    }
-
-    const payments = await fetchAdminOrderPayments(selected.id);
-    const primaryPayment = Array.isArray(payments) && payments.length
-      ? payments
-          .slice()
-          .reverse()
-          .find((payment) => isBankTransferPaymentRecord(payment) && !["paid", "refunded", "cancelled"].includes(normalizeStatusValue(payment.status)))
-          || payments[0]
-      : null;
-
-    if (!primaryPayment?.id || !isBankTransferPaymentRecord(primaryPayment)) {
-      window.alert("No bank transfer payment record was found for this order.");
-      return;
-    }
-
-    await updateAdminPayment(primaryPayment.id, {
-      status: nextStatus,
-      paymentMethod: "Bank Transfer",
-      paymentProvider: "bank_transfer",
-    });
-
-    await updateAdminOrder(
-      selected.id,
-      nextStatus === "paid"
-        ? {
-            paymentMethod: "Bank Transfer",
-            paymentStatus: "paid",
-            orderStatus: "processing",
-          }
-        : {
-            paymentMethod: "Bank Transfer",
-            paymentStatus: "failed",
-          }
-    );
-
-    await loadAdminOrderTimeline(selected.id);
-    await renderCurrentSection();
-  };
-
   document.querySelector("#order-back-button")?.addEventListener("click", async () => {
     adminState.activeSection = "orders";
     syncAdminRoute("push");
@@ -4237,9 +3374,6 @@ const bindOrderDetailInteractions = (selected) => {
     }
     if (String(formData.get("orderStatus") || "") !== String(selected.orderStatus || "")) {
       patch.orderStatus = formData.get("orderStatus");
-    }
-    if (String(formData.get("paymentStatus") || "") !== String(selected.paymentStatus || "")) {
-      patch.paymentStatus = formData.get("paymentStatus");
     }
     if (String(formData.get("shippingStatus") || "") !== String(selected.shippingStatus || "")) {
       patch.shippingStatus = formData.get("shippingStatus");
@@ -4311,13 +3445,6 @@ const bindOrderDetailInteractions = (selected) => {
     await renderCurrentSection();
   });
 
-  document.querySelector("#order-confirm-bank-transfer-button")?.addEventListener("click", async () => {
-    await reviewBankTransferPayment("paid");
-  });
-
-  document.querySelector("#order-reject-bank-transfer-button")?.addEventListener("click", async () => {
-    await reviewBankTransferPayment("failed");
-  });
 };
 
 const renderOrdersSection = async () => {
@@ -4325,6 +3452,22 @@ const renderOrdersSection = async () => {
   const query = adminState.orders.query.trim().toLowerCase();
   const filtered = orders.filter((order) => {
     if (!matchesAdminOrderListFilter(order, adminState.orders.status)) {
+      return false;
+    }
+
+    if (adminState.orders.mode !== "all" && normalizeStatusValue(order.purchaseMode) !== adminState.orders.mode) {
+      return false;
+    }
+    if (adminState.orders.orderStatus !== "all" && normalizeStatusValue(order.orderStatus) !== adminState.orders.orderStatus) {
+      return false;
+    }
+    if (adminState.orders.paymentStatus !== "all" && normalizeStatusValue(order.paymentStatus) !== adminState.orders.paymentStatus) {
+      return false;
+    }
+    if (adminState.orders.shippingStatus !== "all" && normalizeStatusValue(order.shippingStatus) !== adminState.orders.shippingStatus) {
+      return false;
+    }
+    if (!matchesAdminDateFilter(order.createdAt, adminState.orders.date)) {
       return false;
     }
 
@@ -4348,10 +3491,40 @@ const renderOrdersSection = async () => {
 
     return haystack.includes(query);
   });
+  const summaryCounts = orders.reduce(
+    (summary, order) => {
+      const pending = matchesAdminOrderListFilter(order, "pending");
+      const completed = matchesAdminOrderListFilter(order, "completed");
+      const cancelled = matchesAdminOrderListFilter(order, "cancelled");
+      if (pending) summary.pending += 1;
+      if (completed) summary.completed += 1;
+      if (!pending && !completed && !cancelled) summary.inProgress += 1;
+      return summary;
+    },
+    { pending: 0, inProgress: 0, completed: 0 }
+  );
+  const uniqueOptions = (field) =>
+    Array.from(new Set(orders.map((order) => normalizeStatusValue(order?.[field])).filter(Boolean))).sort();
 
   contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <section class="admin-toolbar">
+    <div class="admin-stack admin-commerce-section admin-orders-section">
+      <section class="admin-commerce-summary" aria-label="Order summary">
+        ${[
+          ["All Orders", orders.length],
+          ["Pending", summaryCounts.pending],
+          ["In Progress", summaryCounts.inProgress],
+          ["Completed", summaryCounts.completed],
+        ].map(([label, value]) => `<article class="admin-commerce-summary-card"><span>${escapeHtml(label)}</span><strong>${formatNumber(value)}</strong></article>`).join("")}
+      </section>
+
+      <section class="admin-panel admin-commerce-filter-panel">
+        <div class="admin-panel-header">
+          <div>
+            <h3>Order Management</h3>
+            <p>Track order progress, payment state, and fulfillment.</p>
+          </div>
+        </div>
+        <div class="admin-toolbar admin-commerce-toolbar">
         <label class="admin-search-field">
           <span>Search</span>
           <input
@@ -4362,18 +3535,13 @@ const renderOrdersSection = async () => {
             value="${escapeHtml(adminState.orders.query)}"
           >
         </label>
-        <div class="admin-filter-tabs">
-          ${ORDER_CENTER_FILTERS.map(
-            (item) => `
-              <button
-                type="button"
-                class="admin-filter-chip ${adminState.orders.status === item.value ? "is-active" : ""}"
-                data-order-filter="${escapeHtml(item.value)}"
-              >
-                ${escapeHtml(item.label)}
-              </button>
-            `
-          ).join("")}
+        <div class="admin-commerce-filter-grid">
+          <label>Channel<select id="orders-mode-filter"><option value="all">All</option><option value="retail" ${adminState.orders.mode === "retail" ? "selected" : ""}>Retail</option><option value="wholesale" ${adminState.orders.mode === "wholesale" ? "selected" : ""}>Wholesale</option></select></label>
+          <label>Order Status<select id="orders-order-status-filter"><option value="all">All</option>${uniqueOptions("orderStatus").map((status) => `<option value="${escapeHtml(status)}" ${adminState.orders.orderStatus === status ? "selected" : ""}>${escapeHtml(formatStatusLabel(status))}</option>`).join("")}</select></label>
+          <label>Payment Status<select id="orders-payment-status-filter"><option value="all">All</option>${uniqueOptions("paymentStatus").map((status) => `<option value="${escapeHtml(status)}" ${adminState.orders.paymentStatus === status ? "selected" : ""}>${escapeHtml(formatPaymentStatusLabel(status))}</option>`).join("")}</select></label>
+          <label>Fulfillment<select id="orders-shipping-status-filter"><option value="all">All</option>${uniqueOptions("shippingStatus").map((status) => `<option value="${escapeHtml(status)}" ${adminState.orders.shippingStatus === status ? "selected" : ""}>${escapeHtml(formatStatusLabel(status))}</option>`).join("")}</select></label>
+          <label>Date<input id="orders-date-filter" type="date" value="${escapeHtml(adminState.orders.date)}"></label>
+        </div>
         </div>
       </section>
 
@@ -4394,9 +3562,15 @@ const renderOrdersSection = async () => {
     await renderCurrentSection();
   });
 
-  contentRoot.querySelectorAll("[data-order-filter]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      adminState.orders.status = button.dataset.orderFilter || "all";
+  [
+    ["#orders-mode-filter", "mode"],
+    ["#orders-order-status-filter", "orderStatus"],
+    ["#orders-payment-status-filter", "paymentStatus"],
+    ["#orders-shipping-status-filter", "shippingStatus"],
+    ["#orders-date-filter", "date"],
+  ].forEach(([selector, key]) => {
+    document.querySelector(selector)?.addEventListener("change", async (event) => {
+      adminState.orders[key] = event.target.value || (key === "date" ? "" : "all");
       await renderCurrentSection();
     });
   });
@@ -4474,30 +3648,45 @@ const renderOrderDetailSection = async () => {
 const renderPaymentListMarkup = (payments) =>
   payments.length
     ? `
-      <div class="admin-payment-list">
-        ${payments
-          .map(
-            (payment) => `
-              <article class="admin-payment-row">
-                <div class="admin-payment-row-main">
-                  <strong>${escapeHtml(payment.customerDisplay || payment.customer || "Unknown Customer")}</strong>
-                  <p>${escapeHtml(payment.orderNumberDisplay || payment.orderId || "-")}</p>
-                  <small>${escapeHtml(payment.paymentMethod || "-")}</small>
-                </div>
-                <div class="admin-payment-row-side">
-                  <span>${escapeHtml(formatMoney(payment.amount, payment.currency))}</span>
-                  <span class="admin-pill ${getStatusClass(payment.status)}">${escapeHtml(
-                    formatPaymentStatusLabel(payment.status)
-                  )}</span>
-                  <small>${escapeHtml(formatDate(payment.createdAt))}</small>
-                  <button class="admin-secondary-button" type="button" data-payment-order-id="${escapeHtml(
-                    payment.orderId || ""
-                  )}">View Order</button>
-                </div>
-              </article>
-            `
-          )
-          .join("")}
+      <div class="admin-table-shell admin-commerce-table-shell">
+        <table class="admin-table admin-commerce-table admin-payments-table">
+          <thead>
+            <tr>
+              <th>Payment ID</th>
+              <th>Order #</th>
+              <th>Customer</th>
+              <th>Payment Type</th>
+              <th>Method</th>
+              <th>Amount</th>
+              <th>Currency</th>
+              <th>Status</th>
+              <th>Transaction Reference</th>
+              <th>Paid At</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${payments
+              .map(
+                (payment) => `
+                  <tr>
+                    <td class="admin-mono admin-table-strong">${escapeHtml(payment.paymentId || payment.id || "-")}</td>
+                    <td class="admin-mono">${escapeHtml(payment.orderNumberDisplay || payment.orderId || "-")}</td>
+                    <td>${escapeHtml(payment.customerDisplay || payment.customer || "Unknown Customer")}</td>
+                    <td>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</td>
+                    <td>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</td>
+                    <td class="admin-table-strong">${escapeHtml(formatMoney(payment.amount, payment.currency))}</td>
+                    <td>${escapeHtml(payment.currency || "USD")}</td>
+                    <td><span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span></td>
+                    <td class="admin-mono admin-break-anywhere">${escapeHtml(payment.transactionId || payment.paypalCaptureId || payment.providerReference || "-")}</td>
+                    <td>${escapeHtml(payment.paidAt ? formatDate(payment.paidAt) : "-")}</td>
+                    <td><button class="admin-secondary-button admin-table-action" type="button" data-payment-view="${escapeHtml(payment.id)}">View</button></td>
+                  </tr>
+                `
+              )
+              .join("")}
+          </tbody>
+        </table>
       </div>
     `
     : renderEmptyState("No payment records yet", "Payment records linked to customer orders will appear here.");
@@ -4565,161 +3754,116 @@ const renderPaymentTimelineMarkup = (payment) => {
   `;
 };
 
-const renderPaymentDetailMarkup = ({ payment, order, compact }) => {
+const renderPaymentDetailMarkup = ({ payment, order }) => {
   if (!payment) {
-    return renderEmptyState("Select a payment", "Choose a payment record to review its status and linked order.");
+    return renderEmptyState("Payment not found", "This payment record could not be loaded.");
   }
 
+  const bankTransfer = isBankTransferPaymentRecord(payment);
+  const paypal = normalizePaymentMethodName(payment.paymentMethod) === "paypal" || normalizeStatusValue(payment.paymentProvider) === "paypal";
+  const paymentStatus = normalizeStatusValue(payment.status);
+  const bankTransferCanReview = bankTransfer && !["paid", "refunded", "cancelled"].includes(paymentStatus);
+  const transactionMarkup = paypal
+    ? `
+        <div><dt>PayPal Order ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.paypalOrderId || "-")}</dd></div>
+        <div><dt>Capture ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.paypalCaptureId || "-")}</dd></div>
+        <div class="full"><dt>Transaction ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.transactionId || payment.paypalCaptureId || "-")}</dd></div>
+      `
+    : bankTransfer
+      ? `
+          <div><dt>Bank Reference</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.transactionId || payment.providerReference || "-")}</dd></div>
+          <div><dt>Settlement Channel</dt><dd>${escapeHtml(formatSettlementChannelLabel(payment.settlementChannel))}</dd></div>
+          <div><dt>WorldFirst Reference</dt><dd>Not available from current API</dd></div>
+          <div><dt>Receiving Account</dt><dd>Not available from current API</dd></div>
+          <div><dt>Confirmed By</dt><dd>Not available from current API</dd></div>
+          <div><dt>Confirmed At</dt><dd>${escapeHtml(payment.paidAt ? formatDate(payment.paidAt) : "-")}</dd></div>
+          <div class="full"><dt>Proof / Note</dt><dd>${
+            payment.paymentProofUrl
+              ? `<div class="admin-payment-proof-preview"><a href="${escapeHtml(payment.paymentProofUrl)}" target="_blank" rel="noreferrer"><img src="${escapeHtml(payment.paymentProofUrl)}" alt="Payment proof preview"></a><a href="${escapeHtml(payment.paymentProofUrl)}" target="_blank" rel="noreferrer">Open payment proof</a></div>`
+              : escapeHtml(payment.note || "-")
+          }</dd></div>
+        `
+      : `
+          <div class="full"><dt>Transaction Reference</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.transactionId || payment.providerReference || "-")}</dd></div>
+          <div class="full"><dt>Note</dt><dd>${escapeHtml(payment.note || "-")}</dd></div>
+        `;
+
   return `
-    <div class="admin-payment-detail-stack">
+    <div class="admin-payment-detail-stack admin-finance-detail">
+      <div class="admin-page-actions">
+        <button class="admin-secondary-button" type="button" id="payments-back-button">Back to Payments</button>
+      </div>
+
       <section class="admin-payment-header-card">
         <div class="admin-payment-header-copy">
           <div>
-            <p class="admin-order-overline">${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</p>
+            <p class="admin-order-overline">Payment Record</p>
+            <span class="admin-mono">${escapeHtml(payment.paymentId || payment.id)}</span>
             <h3>${escapeHtml(formatMoney(payment.amount, payment.currency))}</h3>
             <div class="admin-order-header-subline">
+              <span>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</span>
               <span>${escapeHtml(payment.currency || "USD")}</span>
-              <span>${escapeHtml(payment.paymentMethod || "Payment method not set")}</span>
+              <span>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</span>
             </div>
           </div>
-          <span class="admin-pill ${getStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span>
+          <span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span>
         </div>
       </section>
 
-      <div class="admin-payment-detail-layout">
+      <div class="admin-payment-detail-layout admin-payment-detail-layout-finance">
         <div class="admin-payment-detail-column">
           <section class="admin-panel admin-payment-card">
-            <div class="admin-section-head">
-              <h4>Payment Information</h4>
-            </div>
+            <div class="admin-section-head"><h4>Payment Information</h4></div>
             <dl class="admin-description-grid">
-              <div class="full">
-                <dt>Payment ID</dt>
-                <dd class="admin-break-anywhere admin-mono admin-inline-copy-field">
-                  <span>${escapeHtml(payment.paymentId || payment.id)}</span>
-                  <button class="admin-ghost-button" type="button" id="payment-copy-id-button">Copy</button>
-                </dd>
-              </div>
-              <div>
-                <dt>Created Time</dt>
-                <dd>${escapeHtml(formatDate(payment.createdAt))}</dd>
-              </div>
-              <div>
-                <dt>Last Updated</dt>
-                <dd>${escapeHtml(formatDate(payment.updatedAt))}</dd>
-              </div>
-              <div>
-                <dt>Paid Time</dt>
-                <dd>${escapeHtml(payment.paidAt ? formatDate(payment.paidAt) : "-")}</dd>
-              </div>
-              <div>
-                <dt>Payment Provider</dt>
-                <dd>${escapeHtml(formatPaymentProviderLabel(payment.paymentProvider, payment.paymentMethod))}</dd>
-              </div>
-              <div>
-                <dt>Payment Method</dt>
-                <dd>${escapeHtml(payment.paymentMethod || "-")}</dd>
-              </div>
-              <div>
-                <dt>Payment Type</dt>
-                <dd>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</dd>
-              </div>
-              <div>
-                <dt>External Transaction ID</dt>
-                <dd class="admin-break-anywhere admin-mono">${escapeHtml(
-                  payment.transactionId || payment.paypalCaptureId || payment.providerReference || "-"
-                )}</dd>
-              </div>
-              <div>
-                <dt>PayPal Order ID</dt>
-                <dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.paypalOrderId || "-")}</dd>
-              </div>
-              <div>
-                <dt>Failure Reason</dt>
-                <dd class="admin-break-anywhere">${escapeHtml(
-                  normalizeStatusValue(payment.status) === "failed" ? payment.note || "-" : "-"
-                )}</dd>
-              </div>
-              <div>
-                <dt>Refund Amount</dt>
-                <dd>${escapeHtml(
-                  normalizeStatusValue(payment.status) === "refunded" ? formatMoney(payment.amount, payment.currency) : "-"
-                )}</dd>
-              </div>
+              <div class="full"><dt>Payment ID</dt><dd class="admin-break-anywhere admin-mono admin-inline-copy-field"><span>${escapeHtml(payment.paymentId || payment.id)}</span><button class="admin-ghost-button" type="button" id="payment-copy-id-button">Copy</button></dd></div>
+              <div><dt>Order #</dt><dd class="admin-mono">${escapeHtml(order?.orderNumber || order?.orderId || payment.orderId || "-")}</dd></div>
+              <div><dt>Payment Type</dt><dd>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</dd></div>
+              <div><dt>Payment Method</dt><dd>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</dd></div>
+              <div><dt>Amount</dt><dd>${escapeHtml(formatMoney(payment.amount, payment.currency))}</dd></div>
+              <div><dt>Currency</dt><dd>${escapeHtml(payment.currency || "USD")}</dd></div>
+              <div><dt>Payment Status</dt><dd><span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span></dd></div>
+              <div><dt>Created At</dt><dd>${escapeHtml(formatDate(payment.createdAt))}</dd></div>
+              <div><dt>Paid At</dt><dd>${escapeHtml(payment.paidAt ? formatDate(payment.paidAt) : "-")}</dd></div>
             </dl>
           </section>
 
           <section class="admin-panel admin-payment-card">
-            <div class="admin-section-head">
-              <h4>Linked Order</h4>
-            </div>
-            ${
-              order
-                ? `
-                  <button class="admin-linked-order-card" type="button" id="payments-view-order-button">
-                    <div class="admin-linked-record-main">
-                      <strong>${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
-                      <p>${escapeHtml(order.customerName || payment.customer || "-")}</p>
-                      <small>${escapeHtml(order.productName || payment.product || "-")}</small>
-                    </div>
-                    <div class="admin-linked-record-side">
-                      <span>${escapeHtml(order.totalAmount || formatMoney(payment.amount, payment.currency))}</span>
-                      <span class="admin-pill ${getStatusClass(order.orderStatus)}">${escapeHtml(
-                        formatStatusLabel(order.orderStatus)
-                      )}</span>
-                      <span class="admin-link-hint">View Order →</span>
-                    </div>
-                  </button>
-                `
-                : renderEmptyState("Order not found", "The linked order could not be loaded.")
-            }
+            <div class="admin-section-head"><h4>Transaction</h4></div>
+            <dl class="admin-description-grid">${transactionMarkup}</dl>
           </section>
 
           <section class="admin-panel admin-payment-card">
-            <div class="admin-section-head">
-              <h4>Payment Timeline</h4>
-            </div>
-            ${renderPaymentTimelineMarkup(payment)}
+            <div class="admin-section-head"><h4>Related Order</h4></div>
+            ${order
+              ? `<button class="admin-linked-order-card" type="button" id="payments-view-order-button"><div class="admin-linked-record-main"><strong>${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong><p>${escapeHtml(order.customerName || payment.customer || "-")}</p></div><div class="admin-linked-record-side"><span>${escapeHtml(order.totalAmount || formatMoney(payment.amount, payment.currency))}</span><span class="admin-link-hint">View Order</span></div></button>`
+              : renderEmptyState("Order not found", "The linked order could not be loaded.")}
           </section>
         </div>
 
-        <div class="admin-payment-detail-column ${compact ? "" : "admin-payment-detail-column-sticky"}">
+        <div class="admin-payment-detail-column admin-payment-detail-column-sticky">
           <div class="admin-payment-sticky-stack">
             <section class="admin-panel admin-payment-card">
-              <div class="admin-section-head">
-                <h4>Payment Status</h4>
-              </div>
-              <form class="admin-form-stack" id="payment-detail-form">
-                <input type="hidden" name="id" value="${escapeHtml(payment.id)}">
-                <label>
-                  Status
-                  <select name="status">
-                    ${getPaymentStatusSelectOptions(payment.status)
-                      .map(
-                        (status) => `
-                          <option value="${status}" ${normalizeStatusValue(payment.status) === normalizeStatusValue(status) ? "selected" : ""}>
-                            ${escapeHtml(formatStatusLabel(status))}
-                          </option>
-                        `
-                      )
-                      .join("")}
-                  </select>
-                </label>
-                <button class="admin-primary-button" type="submit">Save Payment Status</button>
-              </form>
+              <div class="admin-section-head"><h4>Verification</h4></div>
+              ${paypal ? '<p class="admin-muted">PayPal status is controlled by verified capture and webhook events. Manual Mark as Paid is unavailable.</p>' : ""}
+              ${bankTransfer ? `
+                <p class="admin-muted">Review the bank reference and proof before changing this payment record.</p>
+                ${bankTransferCanReview
+                  ? '<div class="admin-actions-stack"><button class="admin-primary-button" type="button" id="payment-confirm-bank-transfer-button">Confirm Payment</button><button class="admin-secondary-button" type="button" id="payment-reject-bank-transfer-button">Reject Payment</button></div>'
+                  : `<span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span>`}
+              ` : ""}
+              ${!paypal && !bankTransfer ? `
+                <form class="admin-form-stack" id="payment-detail-form">
+                  <input type="hidden" name="id" value="${escapeHtml(payment.id)}">
+                  <label>Status<select name="status">${getPaymentStatusSelectOptions(payment.status).map((status) => `<option value="${status}" ${paymentStatus === normalizeStatusValue(status) ? "selected" : ""}>${escapeHtml(formatStatusLabel(status))}</option>`).join("")}</select></label>
+                  <button class="admin-primary-button" type="submit">Save Payment Status</button>
+                </form>
+              ` : ""}
             </section>
 
-            ${
-              compact
-                ? `
-                  <section class="admin-panel admin-payment-card">
-                    <div class="admin-actions-stack">
-                      <button class="admin-secondary-button" type="button" id="payments-back-button">Back to Payments</button>
-                    </div>
-                  </section>
-                `
-                : ""
-            }
+            <section class="admin-panel admin-payment-card">
+              <div class="admin-section-head"><h4>Payment Timeline</h4></div>
+              ${renderPaymentTimelineMarkup(payment)}
+            </section>
           </div>
         </div>
       </div>
@@ -4727,12 +3871,65 @@ const renderPaymentDetailMarkup = ({ payment, order, compact }) => {
   `;
 };
 
+const renderPaymentDetailSection = async () => {
+  const paymentId = String(adminState.payments.selectedId || "").trim();
+  const payment = paymentId ? await fetchAdminPayment(paymentId) : null;
+  if (!payment) {
+    adminState.payments.mode = "list";
+    adminState.payments.selectedId = null;
+    syncAdminRoute("replace");
+    await renderCurrentSection();
+    return;
+  }
+
+  const order = payment.orderId ? await fetchAdminOrder(payment.orderId) : null;
+  contentRoot.innerHTML = renderPaymentDetailMarkup({ payment, order });
+
+  document.querySelector("#payments-back-button")?.addEventListener("click", async () => {
+    adminState.payments.mode = "list";
+    adminState.payments.selectedId = null;
+    syncAdminRoute("push");
+    await renderCurrentSection();
+  });
+  document.querySelector("#payments-view-order-button")?.addEventListener("click", async () => {
+    await openAdminOrderDetail(payment.orderId || order?.id || null);
+  });
+  document.querySelector("#payment-copy-id-button")?.addEventListener("click", async (event) => {
+    await navigator.clipboard.writeText(payment.paymentId || payment.id);
+    event.currentTarget.textContent = "Copied";
+  });
+  document.querySelector("#payment-confirm-bank-transfer-button")?.addEventListener("click", async () => {
+    await reviewAdminBankTransferPayment(payment.id, "paid");
+    await renderPaymentDetailSection();
+  });
+  document.querySelector("#payment-reject-bank-transfer-button")?.addEventListener("click", async () => {
+    await reviewAdminBankTransferPayment(payment.id, "failed");
+    await renderPaymentDetailSection();
+  });
+  document.querySelector("#payment-detail-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = String(new FormData(event.currentTarget).get("status") || "pending");
+    await updateAdminPayment(payment.id, {
+      status,
+      paidAt: status === "paid" ? new Date().toISOString() : "",
+    });
+    await renderPaymentDetailSection();
+  });
+};
+
 const renderPaymentsSection = async () => {
+  if (adminState.payments.mode === "detail" && adminState.payments.selectedId) {
+    await renderPaymentDetailSection();
+    return;
+  }
+
   const [payments, orders] = await Promise.all([fetchAdminPayments(), fetchAdminOrders()]);
   const orderMap = new Map(orders.map((order) => [String(order.id || ""), order]));
-  const statusMatcher = buildPaymentFilterMatcher(adminState.payments.status);
+  const statusMatcher = adminState.payments.status === "all"
+    ? null
+    : new Set([normalizeStatusValue(adminState.payments.status)]);
   const query = adminState.payments.query.trim().toLowerCase();
-  const filteredPayments = payments
+  const hydratedPayments = payments
     .map((payment) => {
       const linkedOrder = orderMap.get(String(payment.orderId || "")) || null;
       return {
@@ -4742,12 +3939,24 @@ const renderPaymentsSection = async () => {
         customerDisplay: payment.customer || linkedOrder?.customerName || "-",
         customerEmailDisplay: payment.customerEmail || linkedOrder?.email || "",
       };
-    })
-    .filter((payment) => {
+    });
+  const filteredPayments = hydratedPayments.filter((payment) => {
       if (adminState.payments.orderFilterId && String(payment.orderId || "") !== adminState.payments.orderFilterId) {
         return false;
       }
       if (statusMatcher && !statusMatcher.has(normalizeStatusValue(payment.status))) {
+        return false;
+      }
+      if (adminState.payments.method !== "all" && normalizePaymentMethodName(payment.paymentMethod).replace(/\s+/g, "_") !== adminState.payments.method) {
+        return false;
+      }
+      if (adminState.payments.paymentType !== "all" && normalizeStatusValue(payment.paymentType) !== adminState.payments.paymentType) {
+        return false;
+      }
+      if (adminState.payments.currency !== "all" && String(payment.currency || "USD").toLowerCase() !== adminState.payments.currency) {
+        return false;
+      }
+      if (!matchesAdminDateFilter(payment.createdAt, adminState.payments.date)) {
         return false;
       }
       if (!query) {
@@ -4761,20 +3970,45 @@ const renderPaymentsSection = async () => {
         payment.customerDisplay,
         payment.customerEmailDisplay,
         payment.paymentMethod,
+        payment.paymentType,
+        payment.transactionId,
+        payment.paypalCaptureId,
       ]
         .join(" ")
         .toLowerCase();
       return haystack.includes(query);
     });
+  const uniquePaymentOptions = (field, formatter = normalizeStatusValue) =>
+    Array.from(new Set(hydratedPayments.map((payment) => formatter(payment?.[field])).filter(Boolean))).sort();
+  const receivedTotals = hydratedPayments.filter(isPaidPaymentRecord).reduce((totals, payment) => {
+    const currency = String(payment.currency || "USD").toUpperCase();
+    totals[currency] = Number(totals[currency] || 0) + Number(payment.amount || 0);
+    return totals;
+  }, {});
+  const receivedLabel = Object.entries(receivedTotals).map(([currency, amount]) => formatMoney(amount, currency)).join(" / ") || formatMoney(0, "USD");
+  const pendingVerification = hydratedPayments.filter(
+    (payment) => isBankTransferPaymentRecord(payment) && ["pending", "unpaid", "payment_submitted"].includes(normalizeStatusValue(payment.status))
+  ).length;
+  const failedCount = hydratedPayments.filter((payment) => normalizeStatusValue(payment.status) === "failed").length;
+  const refundedCount = hydratedPayments.filter((payment) => ["refunded", "partially_refunded"].includes(normalizeStatusValue(payment.status))).length;
   syncAdminRoute("replace");
 
   contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <section class="admin-panel">
+    <div class="admin-stack admin-commerce-section admin-payments-section">
+      <section class="admin-commerce-summary" aria-label="Payment summary">
+        ${[
+          ["Total Received", receivedLabel],
+          ["Pending Verification", pendingVerification],
+          ["Failed", failedCount],
+          ["Refunded", refundedCount],
+        ].map(([label, value]) => `<article class="admin-commerce-summary-card"><span>${escapeHtml(label)}</span><strong>${typeof value === "number" ? formatNumber(value) : escapeHtml(value)}</strong></article>`).join("")}
+      </section>
+
+      <section class="admin-panel admin-commerce-filter-panel">
         <div class="admin-panel-header">
           <div>
-            <h3>Payments</h3>
-            <p>Review payment records linked to customer orders.</p>
+            <h3>Financial Transactions</h3>
+            <p>Review individual payment records, settlement references, and verification status.</p>
           </div>
           ${
             adminState.payments.orderFilterId
@@ -4783,32 +4017,28 @@ const renderPaymentsSection = async () => {
           }
         </div>
 
-        <div class="admin-toolbar">
+        <div class="admin-toolbar admin-commerce-toolbar">
           <label class="admin-search-field">
             <span>Search</span>
             <input
               id="payments-search"
               class="admin-search-input"
               type="search"
-              placeholder="Search payment ID, order number, customer, email or method"
+              placeholder="Search payment ID, order number, transaction ID or customer"
               value="${escapeHtml(adminState.payments.query)}"
             >
           </label>
-          <div class="admin-filter-tabs">
-            ${PAYMENT_FILTER_OPTIONS.map(
-              (item) => `
-                <button
-                  type="button"
-                  class="admin-filter-chip ${adminState.payments.status === item.value ? "is-active" : ""}"
-                  data-payment-filter="${escapeHtml(item.value)}"
-                >
-                  ${escapeHtml(item.label)}
-                </button>
-              `
-            ).join("")}
+          <div class="admin-commerce-filter-grid">
+            <label>Method<select id="payments-method-filter"><option value="all">All</option>${uniquePaymentOptions("paymentMethod", (value) => normalizePaymentMethodName(value).replace(/\s+/g, "_")).map((method) => `<option value="${escapeHtml(method)}" ${adminState.payments.method === method ? "selected" : ""}>${escapeHtml(formatPaymentMethodLabel(method))}</option>`).join("")}</select></label>
+            <label>Payment Type<select id="payments-type-filter"><option value="all">All</option>${uniquePaymentOptions("paymentType").map((type) => `<option value="${escapeHtml(type)}" ${adminState.payments.paymentType === type ? "selected" : ""}>${escapeHtml(formatPaymentTypeLabel(type))}</option>`).join("")}</select></label>
+            <label>Status<select id="payments-status-filter"><option value="all">All</option>${uniquePaymentOptions("status").map((status) => `<option value="${escapeHtml(status)}" ${adminState.payments.status === status ? "selected" : ""}>${escapeHtml(formatPaymentStatusLabel(status))}</option>`).join("")}</select></label>
+            <label>Currency<select id="payments-currency-filter"><option value="all">All</option>${uniquePaymentOptions("currency", (value) => String(value || "USD").toLowerCase()).map((currency) => `<option value="${escapeHtml(currency)}" ${adminState.payments.currency === currency ? "selected" : ""}>${escapeHtml(currency.toUpperCase())}</option>`).join("")}</select></label>
+            <label>Date<input id="payments-date-filter" type="date" value="${escapeHtml(adminState.payments.date)}"></label>
           </div>
         </div>
+      </section>
 
+      <section class="admin-panel">
         <div class="admin-panel-header">
           <div>
             <h4>Payment Records</h4>
@@ -4825,16 +4055,25 @@ const renderPaymentsSection = async () => {
     await renderCurrentSection();
   });
 
-  contentRoot.querySelectorAll("[data-payment-filter]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      adminState.payments.status = button.dataset.paymentFilter || "all";
+  [
+    ["#payments-method-filter", "method"],
+    ["#payments-type-filter", "paymentType"],
+    ["#payments-status-filter", "status"],
+    ["#payments-currency-filter", "currency"],
+    ["#payments-date-filter", "date"],
+  ].forEach(([selector, key]) => {
+    document.querySelector(selector)?.addEventListener("change", async (event) => {
+      adminState.payments[key] = event.target.value || (key === "date" ? "" : "all");
       await renderCurrentSection();
     });
   });
 
-  contentRoot.querySelectorAll("[data-payment-order-id]").forEach((button) => {
+  contentRoot.querySelectorAll("[data-payment-view]").forEach((button) => {
     button.addEventListener("click", async () => {
-      await openAdminOrderDetail(button.dataset.paymentOrderId || null);
+      adminState.payments.mode = "detail";
+      adminState.payments.selectedId = button.dataset.paymentView || null;
+      syncAdminRoute("push");
+      await renderCurrentSection();
     });
   });
 
@@ -4846,532 +4085,214 @@ const renderPaymentsSection = async () => {
 
 };
 
-const renderCustomersSectionLocalLegacy = async () => {
-  let threads = await window.NorthstarStore.listCustomerThreads();
-
-  if (!threads.some((thread) => thread.id === adminState.customers.selectedId)) {
-    adminState.customers.selectedId = threads[0]?.id || null;
-  }
-
-  let selected = threads.find((thread) => thread.id === adminState.customers.selectedId) || null;
-
-  if (selected?.unreadCount) {
-    await window.NorthstarStore.markMessageThreadRead(selected.id);
-    threads = await window.NorthstarStore.listCustomerThreads();
-    selected = threads.find((thread) => thread.id === adminState.customers.selectedId) || null;
-  }
-
-  contentRoot.innerHTML = `
-    <div class="admin-chat-layout">
-      <section class="admin-panel admin-thread-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Customer List</h3>
-            <p>${formatNumber(threads.length)} active thread${threads.length === 1 ? "" : "s"}</p>
-          </div>
-        </div>
-        ${
-          threads.length
-            ? `
-              <div class="admin-thread-list">
-                ${threads
-                  .map(
-                    (thread) => `
-                      <button
-                        type="button"
-                        class="admin-thread-row ${thread.id === selected?.id ? "is-active" : ""}"
-                        data-thread-id="${escapeHtml(thread.id)}"
-                      >
-                        <div>
-                          <strong>${escapeHtml(thread.customerName || "Website Visitor")}</strong>
-                          <p>${escapeHtml(thread.email || thread.country || "Support chat")}</p>
-                        </div>
-                        <div class="admin-thread-side">
-                          ${
-                            thread.unreadCount
-                              ? `<span class="admin-unread-badge">${formatNumber(thread.unreadCount)}</span>`
-                              : ""
-                          }
-                          <small>${escapeHtml(formatShortDate(thread.updatedAt))}</small>
-                        </div>
-                      </button>
-                    `
-                  )
-                  .join("")}
-              </div>
-            `
-            : renderEmptyState("No customer conversations yet", "Support chats will appear here.")
-        }
-      </section>
-
-      <section class="admin-panel admin-chat-panel">
-        ${
-          selected
-            ? `
-              <div class="admin-chat-header">
-                <div>
-                  <h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3>
-                  <p>${escapeHtml(selected.email || "No email")} · ${escapeHtml(selected.country || "No country")}</p>
-                </div>
-                <div class="admin-chat-header-actions">
-                  <label>
-                    <span>Status</span>
-                    <select id="thread-status-select">
-                      <option value="open" ${selected.status === "open" ? "selected" : ""}>open</option>
-                      <option value="replied" ${selected.status === "replied" ? "selected" : ""}>replied</option>
-                      <option value="closed" ${selected.status === "closed" ? "selected" : ""}>closed</option>
-                    </select>
-                  </label>
-                  <button class="admin-danger-button" type="button" id="thread-delete-button">Delete</button>
-                </div>
-              </div>
-
-              <div class="admin-chat-history">
-                ${
-                  selected.messages.length
-                    ? selected.messages
-                        .map((message) => {
-                          const isCustomer = message.sender === "customer";
-                          const label =
-                            message.sender === "assistant"
-                              ? "Auto Reply"
-                              : isCustomer
-                                ? selected.customerName || "Customer"
-                                : "Admin";
-
-                          return `
-                            <article class="admin-chat-message ${isCustomer ? "is-customer" : "is-admin"}">
-                              <div class="admin-chat-bubble">
-                                ${message.image ? `<img class="admin-chat-image" src="${escapeHtml(message.image)}" alt="Shared image">` : ""}
-                                ${message.text ? `<p>${escapeHtml(message.text)}</p>` : ""}
-                              </div>
-                              <div class="admin-chat-meta">
-                                <span>${escapeHtml(label)}</span>
-                                <small>${escapeHtml(formatDate(message.createdAt))}</small>
-                              </div>
-                            </article>
-                          `;
-                        })
-                        .join("")
-                    : renderEmptyState("No messages yet", "Send the first reply from this panel.")
-                }
-              </div>
-
-              <div class="admin-quick-replies">
-                ${[
-                  "Thanks. We are reviewing your request now.",
-                  "Please confirm your target quantity and destination port.",
-                  "We can share pricing after MOQ and packaging are confirmed.",
-                ]
-                  .map(
-                    (reply) => `
-                      <button type="button" class="admin-quick-reply" data-quick-reply="${escapeHtml(reply)}">
-                        ${escapeHtml(reply)}
-                      </button>
-                    `
-                  )
-                  .join("")}
-              </div>
-
-              <form class="admin-chat-composer" id="customer-reply-form">
-                <textarea
-                  name="text"
-                  rows="4"
-                  placeholder="Write a reply to the customer"
-                ></textarea>
-                <label class="admin-file-field">
-                  <span>Send Image</span>
-                  <input type="file" name="image" accept="image/*">
-                </label>
-                <div class="admin-actions-inline">
-                  <button class="admin-primary-button" type="submit">Send Reply</button>
-                </div>
-              </form>
-            `
-            : renderEmptyState("No customer selected", "Choose a customer thread to open the chat window.")
-        }
-      </section>
-    </div>
-  `;
-
-  contentRoot.querySelectorAll("[data-thread-id]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      adminState.customers.selectedId = button.dataset.threadId || null;
-      await renderCurrentSection();
-    });
-  });
-
-  contentRoot.querySelectorAll("[data-quick-reply]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const textarea = contentRoot.querySelector("#customer-reply-form textarea");
-      if (textarea) {
-        textarea.value = button.dataset.quickReply || "";
-        textarea.focus();
-      }
-    });
-  });
-
-  document.querySelector("#thread-status-select")?.addEventListener("change", async (event) => {
-    if (!selected?.id) {
-      return;
-    }
-
-    await window.NorthstarStore.updateMessageStatus(selected.id, event.target.value);
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#thread-delete-button")?.addEventListener("click", async () => {
-    if (!selected?.id) {
-      return;
-    }
-
-    if (!window.confirm("Delete this customer conversation?")) {
-      return;
-    }
-
-    await window.NorthstarStore.deleteMessageThread(selected.id);
-    adminState.customers.selectedId = null;
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#customer-reply-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-
-    if (!selected?.id) {
-      return;
-    }
-
-    const form = event.currentTarget;
-    const formData = new FormData(form);
-    const text = String(formData.get("text") || "").trim();
-    const file = formData.get("image");
-    let image = "";
-
-    if (file && typeof file === "object" && file.size) {
-      image = await fileToDataUrl(file);
-    }
-
-    if (!text && !image) {
-      return;
-    }
-
-    await window.NorthstarStore.appendMessage(selected.id, {
-      sender: "admin",
-      text,
-      image,
-    });
-
-    form.reset();
-    await renderCurrentSection();
-  });
+const getAdminCustomerKey = (record, fallbackIndex = 0) => {
+  const customerId = String(record?.customerId || "").trim();
+  const email = String(record?.email || "").trim().toLowerCase();
+  const phone = String(record?.phone || record?.customerPhone || "").trim();
+  const name = String(record?.customerName || "").trim().toLowerCase();
+  if (customerId) return `id:${customerId}`;
+  if (email) return `email:${email}`;
+  if (phone) return `phone:${phone}`;
+  return `name:${name || "customer"}:${fallbackIndex}`;
 };
 
-const renderCustomersSectionLegacy = async () => {
-  let conversations = [];
-  const customerOrders = [];
+const formatAdminCurrencyTotals = (entries) => {
+  const totals = (Array.isArray(entries) ? entries : []).reduce((result, entry) => {
+    const currency = String(entry?.currency || "USD").toUpperCase();
+    result[currency] = Number(result[currency] || 0) + parseMoneyValue(entry?.totalAmount || entry?.subtotal || 0);
+    return result;
+  }, {});
+  return Object.entries(totals).map(([currency, value]) => formatMoney(value, currency)).join(" / ") || formatMoney(0, "USD");
+};
 
-  try {
-    conversations = await fetchAdminSupportConversations({
-      query: adminState.customers.query,
-      status: adminState.customers.status,
-      conversationType: adminState.customers.conversationType,
-    });
-  } catch (error) {
-    contentRoot.innerHTML = `
-      <section class="admin-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Customer Support</h3>
-            <p class="admin-error-text">Failed to load support conversations: ${escapeHtml(
-              error?.message || "Unknown error."
-            )}</p>
-          </div>
-        </div>
+const buildAdminCustomerRecords = (orders, conversations) => {
+  const records = new Map();
+  const aliases = new Map();
+  const upsert = (source, index) => {
+    const sourceAliases = [
+      String(source?.customerId || "").trim() ? `id:${String(source.customerId).trim()}` : "",
+      String(source?.email || "").trim() ? `email:${String(source.email).trim().toLowerCase()}` : "",
+      String(source?.phone || source?.customerPhone || "").trim()
+        ? `phone:${String(source.phone || source.customerPhone).trim()}`
+        : "",
+    ].filter(Boolean);
+    const key = sourceAliases.map((alias) => aliases.get(alias)).find(Boolean) || getAdminCustomerKey(source, index);
+    if (!records.has(key)) {
+      records.set(key, {
+        key,
+        customerId: String(source?.customerId || "").trim(),
+        customerName: String(source?.customerName || "").trim(),
+        email: String(source?.email || "").trim(),
+        phone: String(source?.phone || source?.customerPhone || "").trim(),
+        company: String(source?.company || "").trim(),
+        country: String(source?.country || "").trim(),
+        customerType: String(source?.customerType || "").trim(),
+        customerStatus: String(source?.customerStatus || "").trim(),
+        createdAt: String(source?.createdAt || "").trim(),
+        lastActivity: String(source?.updatedAt || source?.lastMessageAt || source?.createdAt || "").trim(),
+        orders: [],
+        conversations: [],
+      });
+    }
+    sourceAliases.forEach((alias) => aliases.set(alias, key));
+
+    const customer = records.get(key);
+    customer.customerId ||= String(source?.customerId || "").trim();
+    customer.customerName ||= String(source?.customerName || "").trim();
+    customer.email ||= String(source?.email || "").trim();
+    customer.phone ||= String(source?.phone || source?.customerPhone || "").trim();
+    customer.company ||= String(source?.company || "").trim();
+    customer.country ||= String(source?.country || "").trim();
+    customer.customerType ||= String(source?.customerType || "").trim();
+    customer.customerStatus ||= String(source?.customerStatus || "").trim();
+    const sourceCreatedAt = String(source?.createdAt || "").trim();
+    if (sourceCreatedAt && (!customer.createdAt || new Date(sourceCreatedAt) < new Date(customer.createdAt))) {
+      customer.createdAt = sourceCreatedAt;
+    }
+    const activity = String(source?.lastMessageAt || source?.updatedAt || source?.createdAt || "").trim();
+    if (activity && (!customer.lastActivity || new Date(activity) > new Date(customer.lastActivity))) {
+      customer.lastActivity = activity;
+    }
+    return customer;
+  };
+
+  (Array.isArray(conversations) ? conversations : []).forEach((conversation, index) => {
+    const customer = upsert(conversation, index);
+    customer.conversations.push(conversation);
+  });
+  (Array.isArray(orders) ? orders : []).forEach((order, index) => {
+    const customer = upsert(order, index + 100000);
+    customer.orders.push(order);
+  });
+
+  return Array.from(records.values())
+    .map((customer) => {
+      customer.orders.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+      customer.conversations.sort((left, right) => new Date(right.lastMessageAt || right.updatedAt).getTime() - new Date(left.lastMessageAt || left.updatedAt).getTime());
+      const wholesale = customer.orders.some((order) => normalizeStatusValue(order.purchaseMode) === "wholesale") ||
+        customer.conversations.some((conversation) => normalizeStatusValue(conversation.conversationType) === "wholesale_inquiry");
+      const customerType = normalizeStatusValue(customer.customerType);
+      customer.customerType = ["wholesale", "b2b"].includes(customerType)
+        ? "wholesale"
+        : ["retail", "b2c"].includes(customerType)
+          ? "retail"
+          : wholesale
+            ? "wholesale"
+            : "retail";
+      customer.customerStatus = normalizeStatusValue(customer.customerStatus) || (customer.orders.length ? "active" : "new");
+      customer.totalSpend = formatAdminCurrencyTotals(customer.orders);
+      customer.averageOrderValue = customer.orders.length
+        ? formatAdminCurrencyTotals(customer.orders.map((order) => ({ ...order, totalAmount: parseMoneyValue(order.totalAmount || order.subtotal) / customer.orders.filter((item) => String(item.currency || "USD").toUpperCase() === String(order.currency || "USD").toUpperCase()).length })))
+        : formatMoney(0, "USD");
+      return customer;
+    })
+    .sort((left, right) => new Date(right.lastActivity || 0).getTime() - new Date(left.lastActivity || 0).getTime());
+};
+
+const renderAdminCustomerDetail = (customer) => {
+  const recentOrders = customer.orders.slice(0, 5);
+  const lastOrder = customer.orders[0] || null;
+  const lastConversation = customer.conversations[0] || null;
+  return `
+    <div class="admin-stack admin-customer-record-detail">
+      <div class="admin-page-actions"><button class="admin-secondary-button" type="button" id="customer-list-back">Back to Customers</button></div>
+      <section class="admin-customer-record-header">
+        <span class="admin-customer-avatar">${escapeHtml((customer.customerName || customer.email || "C").slice(0, 1).toUpperCase())}</span>
+        <div><p class="admin-order-overline">Customer</p><h3>${escapeHtml(customer.customerName || "Customer")}</h3><p>${escapeHtml(customer.email || "No email")}</p></div>
+        <span class="admin-pill ${getAdminPillStatusClass(customer.customerStatus)}">${escapeHtml(formatStatusLabel(customer.customerStatus))}</span>
       </section>
-    `;
+
+      <div class="admin-customer-detail-columns">
+        <section class="admin-panel"><div class="admin-section-head"><h4>Profile</h4></div><dl class="admin-description-grid">
+          <div><dt>Name</dt><dd>${escapeHtml(customer.customerName || "-")}</dd></div>
+          <div><dt>Email</dt><dd class="admin-break-anywhere">${escapeHtml(customer.email || "-")}</dd></div>
+          <div><dt>Company</dt><dd>${escapeHtml(customer.company || "-")}</dd></div>
+          <div><dt>Country</dt><dd>${escapeHtml(customer.country || "-")}</dd></div>
+          <div><dt>Customer Type</dt><dd>${escapeHtml(formatStatusLabel(customer.customerType))}</dd></div>
+          <div><dt>Created</dt><dd>${escapeHtml(formatDate(customer.createdAt))}</dd></div>
+        </dl></section>
+        <section class="admin-panel"><div class="admin-section-head"><h4>Commercial Summary</h4></div><dl class="admin-description-grid">
+          <div><dt>Orders</dt><dd>${formatNumber(customer.orders.length)}</dd></div>
+          <div><dt>Total Spend</dt><dd>${escapeHtml(customer.totalSpend)}</dd></div>
+          <div><dt>Average Order Value</dt><dd>${escapeHtml(customer.averageOrderValue)}</dd></div>
+          <div><dt>Last Order</dt><dd>${escapeHtml(lastOrder?.orderNumber || lastOrder?.orderId || "-")}</dd></div>
+        </dl></section>
+      </div>
+
+      <section class="admin-panel"><div class="admin-section-head"><h4>Recent Orders</h4></div>${recentOrders.length ? `<div class="admin-table-shell"><table class="admin-table"><thead><tr><th>Order #</th><th>Total</th><th>Order Status</th><th>Created</th><th>Action</th></tr></thead><tbody>${recentOrders.map((order) => `<tr><td class="admin-mono">${escapeHtml(order.orderNumber || order.orderId || order.id)}</td><td>${escapeHtml(order.totalAmount || order.subtotal || "-")}</td><td><span class="admin-pill ${getAdminPillStatusClass(order.orderStatus)}">${escapeHtml(formatStatusLabel(order.orderStatus))}</span></td><td>${escapeHtml(formatShortDate(order.createdAt))}</td><td><button class="admin-secondary-button admin-table-action" type="button" data-customer-record-order="${escapeHtml(order.id)}">View</button></td></tr>`).join("")}</tbody></table></div>` : renderEmptyState("No orders", "This customer has no orders yet.")}</section>
+
+      <section class="admin-panel"><div class="admin-section-head"><h4>Recent Inquiries / Support</h4>${lastConversation ? '<button class="admin-primary-button" type="button" id="customer-open-support">Open Support Conversation</button>' : ""}</div>${lastConversation ? `<dl class="admin-description-grid"><div><dt>Last Conversation</dt><dd>${escapeHtml(lastConversation.subject || lastConversation.lastMessageText || "Support conversation")}</dd></div><div><dt>Conversation Status</dt><dd>${escapeHtml(formatStatusLabel(lastConversation.status || "open"))}</dd></div><div><dt>Last Contact</dt><dd>${escapeHtml(formatDate(lastConversation.lastMessageAt || lastConversation.updatedAt))}</dd></div></dl>` : renderEmptyState("No support conversations", "No recent customer inquiry is linked to this record.")}</section>
+    </div>
+  `;
+};
+
+const renderCustomerListSection = async () => {
+  const [orders, conversations] = await Promise.all([fetchAdminOrders(), fetchAdminSupportConversations()]);
+  const customers = buildAdminCustomerRecords(orders, conversations);
+  const selected = customers.find((customer) => customer.key === adminState.customerList.selectedKey) || null;
+  if (adminState.customerList.mode === "detail" && selected) {
+    contentRoot.innerHTML = renderAdminCustomerDetail(selected);
+    document.querySelector("#customer-list-back")?.addEventListener("click", async () => {
+      adminState.customerList.mode = "list";
+      await renderCurrentSection();
+    });
+    document.querySelector("#customer-open-support")?.addEventListener("click", async () => {
+      adminState.activeSection = "support";
+      adminState.customers.selectedId = selected.conversations[0]?.id || null;
+      adminState.customers.detailsOpen = false;
+      syncAdminRoute("push");
+      await renderCurrentSection();
+    });
+    contentRoot.querySelectorAll("[data-customer-record-order]").forEach((button) => button.addEventListener("click", async () => {
+      await openAdminOrderDetail(button.dataset.customerRecordOrder || null);
+    }));
     return;
   }
 
-  if (!conversations.some((thread) => thread.id === adminState.customers.selectedId)) {
-    adminState.customers.selectedId = conversations[0]?.id || null;
-  }
-
-  let selected = conversations.find((thread) => thread.id === adminState.customers.selectedId) || null;
-  let messages = [];
-  let detailError = "";
-
-  if (selected?.id) {
-    try {
-      if (selected.adminUnreadCount > 0) {
-        await markAdminSupportConversationRead(selected.id);
-        conversations = await fetchAdminSupportConversations({
-          query: adminState.customers.query,
-          status: adminState.customers.status,
-          conversationType: adminState.customers.conversationType,
-        });
-        selected = conversations.find((thread) => thread.id === adminState.customers.selectedId) || selected;
-      }
-
-      const [nextSelected, nextMessages] = await Promise.all([
-        fetchAdminSupportConversation(selected.id),
-        fetchAdminSupportMessages(selected.id),
-      ]);
-      selected = nextSelected || selected;
-      messages = nextMessages;
-    } catch (error) {
-      detailError = error?.message || "Unknown error.";
-    }
-  }
+  adminState.customerList.mode = "list";
+  const query = adminState.customerList.query.trim().toLowerCase();
+  const countries = Array.from(new Set(customers.map((customer) => customer.country).filter(Boolean))).sort();
+  const statuses = Array.from(new Set(customers.map((customer) => customer.customerStatus).filter(Boolean))).sort();
+  const filtered = customers.filter((customer) => {
+    if (adminState.customerList.type !== "all" && customer.customerType !== adminState.customerList.type) return false;
+    if (adminState.customerList.country !== "all" && customer.country !== adminState.customerList.country) return false;
+    if (adminState.customerList.status !== "all" && customer.customerStatus !== adminState.customerList.status) return false;
+    if (!query) return true;
+    return [customer.customerName, customer.email, customer.company, customer.country].join(" ").toLowerCase().includes(query);
+  });
 
   contentRoot.innerHTML = `
-    <div class="admin-stack">
-      <div class="admin-chat-layout admin-support-layout">
-        <section class="admin-panel admin-thread-panel">
-          <div class="admin-thread-panel-head">
-            <div class="admin-panel-header admin-panel-header-compact">
-              <div>
-                <h3>Customer List</h3>
-                <p>${formatNumber(conversations.length)} active conversation${conversations.length === 1 ? "" : "s"}</p>
-              </div>
-            </div>
-            <div class="admin-thread-filters">
-              <label class="admin-search-field admin-search-field-compact">
-                <span>Search</span>
-                <input
-                  id="support-search"
-                  class="admin-search-input"
-                  type="search"
-                  placeholder="Search customer, email, order, product"
-                  value="${escapeHtml(adminState.customers.query)}"
-                >
-              </label>
-              <div class="admin-thread-filter-row">
-                <label>
-                  <span>Status</span>
-                  <select id="support-status-filter">
-                    <option value="all" ${adminState.customers.status === "all" ? "selected" : ""}>All</option>
-                    ${SUPPORT_CONVERSATION_STATUSES.map(
-                      (status) => `
-                        <option value="${status}" ${adminState.customers.status === status ? "selected" : ""}>${formatStatusLabel(status)}</option>
-                      `
-                    ).join("")}
-                  </select>
-                </label>
-                <label>
-                  <span>Type</span>
-                  <select id="support-type-filter">
-                    <option value="all" ${adminState.customers.conversationType === "all" ? "selected" : ""}>All</option>
-                    ${SUPPORT_CONVERSATION_TYPES.map(
-                      (type) => `
-                        <option value="${type}" ${adminState.customers.conversationType === type ? "selected" : ""}>${formatStatusLabel(type)}</option>
-                      `
-                    ).join("")}
-                  </select>
-                </label>
-              </div>
-            </div>
+    <div class="admin-stack admin-customer-records">
+      <section class="admin-panel admin-customer-records-toolbar">
+        <div class="admin-panel-header"><div><h3>Customers</h3><p>Manage customer records and account activity.</p></div><strong>${formatNumber(customers.length)} customers</strong></div>
+        <div class="admin-toolbar admin-commerce-toolbar">
+          <label class="admin-search-field"><span>Search</span><input id="customer-list-search" class="admin-search-input" type="search" placeholder="Search name, email, company or country" value="${escapeHtml(adminState.customerList.query)}"></label>
+          <div class="admin-customer-record-filter-grid">
+            <label>Customer Type<select id="customer-list-type"><option value="all">All</option><option value="retail" ${adminState.customerList.type === "retail" ? "selected" : ""}>Retail</option><option value="wholesale" ${adminState.customerList.type === "wholesale" ? "selected" : ""}>Wholesale</option></select></label>
+            <label>Country<select id="customer-list-country"><option value="all">All</option>${countries.map((country) => `<option value="${escapeHtml(country)}" ${adminState.customerList.country === country ? "selected" : ""}>${escapeHtml(country)}</option>`).join("")}</select></label>
+            <label>Status<select id="customer-list-status"><option value="all">All</option>${statuses.map((status) => `<option value="${escapeHtml(status)}" ${adminState.customerList.status === status ? "selected" : ""}>${escapeHtml(formatStatusLabel(status))}</option>`).join("")}</select></label>
           </div>
-          <div class="admin-thread-list">
-            ${conversations.map((thread) => createAdminConversationRowMarkup(thread, selected?.id)).join("")}
-          </div>
-          <div class="admin-empty-state"${conversations.length ? " hidden" : ""}>
-            <h4>No customer conversations yet</h4>
-            <p>Support chats will appear here.</p>
-          </div>
-        </section>
-
-        <section class="admin-panel admin-chat-panel">
-          ${
-            selected
-              ? detailError
-                ? `
-                  <div class="admin-panel-header">
-                    <div>
-                      <h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3>
-                      <p class="admin-error-text">Failed to load conversation: ${escapeHtml(detailError)}</p>
-                    </div>
-                  </div>
-                `
-                : `
-                  <div class="admin-chat-header">
-                    <div class="admin-chat-header-main">
-                      <h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3>
-                      <p>${escapeHtml(selected.email || "No email")} · ${escapeHtml(selected.country || "No country")}</p>
-                      <p>${escapeHtml(
-                        [
-                          selected.relatedOrderNumber ? `Order ${selected.relatedOrderNumber}` : "",
-                          selected.relatedProductName || "",
-                          formatStatusLabel(selected.conversationType || ""),
-                        ]
-                          .filter(Boolean)
-                          .join(" · ") || "Support conversation"
-                      )}</p>
-                    </div>
-                    <div class="admin-chat-header-actions">
-                      <label>
-                        <span>Status</span>
-                        <select id="thread-status-select">
-                          ${SUPPORT_CONVERSATION_STATUSES.map(
-                            (status) => `
-                              <option value="${status}" ${selected.status === status ? "selected" : ""}>${formatStatusLabel(status)}</option>
-                            `
-                          ).join("")}
-                        </select>
-                      </label>
-                      <button class="admin-secondary-button" type="button" id="thread-resolve-button">Mark Resolved</button>
-                      <button class="admin-secondary-button" type="button" id="thread-reopen-button">Reopen</button>
-                    </div>
-                  </div>
-
-                  <div class="admin-chat-history">
-                    ${
-                      messages.length
-                        ? messages.map((message) => createAdminChatMessageMarkup(message, selected)).join("")
-                        : renderEmptyState("No messages yet", "Send the first reply from this panel.")
-                    }
-                  </div>
-
-                  <div class="admin-chat-footer">
-                    <details class="admin-quick-replies-drawer">
-                      <summary>Quick Replies</summary>
-                      <div class="admin-quick-replies">
-                        ${[
-                          "Thanks. We are reviewing your request now.",
-                          "Please confirm your target quantity and destination port.",
-                          "We can share pricing after MOQ and packaging are confirmed.",
-                        ]
-                          .map(
-                            (reply) => `
-                              <button type="button" class="admin-quick-reply" data-quick-reply="${escapeHtml(reply)}">
-                                ${escapeHtml(reply)}
-                              </button>
-                            `
-                          )
-                          .join("")}
-                      </div>
-                    </details>
-
-                    <form class="admin-chat-composer" id="customer-reply-form">
-                      <textarea
-                        name="text"
-                        rows="1"
-                        placeholder="Write a reply to the customer"
-                      ></textarea>
-                      <div class="admin-chat-composer-actions">
-                        <label class="admin-file-field admin-chat-attach">
-                          <input type="file" name="image" accept="image/*">
-                          <span>Attach Image</span>
-                        </label>
-                        <button class="admin-primary-button" type="submit" ${adminSupportRuntime.isSending ? "disabled" : ""}>${
-                          adminSupportRuntime.isSending ? "Sending..." : "Send Reply"
-                        }</button>
-                      </div>
-                      <p class="admin-form-status" id="admin-support-send-status" aria-live="polite"></p>
-                    </form>
-                  </div>
-                `
-              : renderEmptyState("No customer selected", "Choose a customer thread to open the chat window.")
-          }
-        </section>
-        ${createCustomerPanelMarkup(selected, customerOrders)}
-      </div>
+        </div>
+      </section>
+      <section class="admin-panel"><div class="admin-panel-header"><div><h4>Customer Records</h4><p>${formatNumber(filtered.length)} result${filtered.length === 1 ? "" : "s"}</p></div></div>${filtered.length ? `<div class="admin-table-shell admin-commerce-table-shell"><table class="admin-table admin-commerce-table admin-customer-records-table"><thead><tr><th>Customer</th><th>Company</th><th>Country</th><th>Type</th><th>Orders</th><th>Total Spend</th><th>Last Activity</th><th>Status</th><th>Action</th></tr></thead><tbody>${filtered.map((customer) => `<tr><td><strong>${escapeHtml(customer.customerName || "Customer")}</strong><small>${escapeHtml(customer.email || "No email")}</small></td><td>${escapeHtml(customer.company || "-")}</td><td>${escapeHtml(customer.country || "-")}</td><td>${escapeHtml(formatStatusLabel(customer.customerType))}</td><td>${formatNumber(customer.orders.length)}</td><td class="admin-table-strong">${escapeHtml(customer.totalSpend)}</td><td>${escapeHtml(formatShortDate(customer.lastActivity))}</td><td><span class="admin-pill ${getAdminPillStatusClass(customer.customerStatus)}">${escapeHtml(formatStatusLabel(customer.customerStatus))}</span></td><td><button class="admin-secondary-button admin-table-action" type="button" data-customer-record="${escapeHtml(customer.key)}">View</button></td></tr>`).join("")}</tbody></table></div>` : renderEmptyState("No customers found", "Adjust the filters to view customer records.")}</section>
     </div>
   `;
 
-  document.querySelector("#support-search")?.addEventListener("input", async (event) => {
-    adminState.customers.query = event.target.value;
+  document.querySelector("#customer-list-search")?.addEventListener("input", async (event) => {
+    adminState.customerList.query = event.target.value;
     await renderCurrentSection();
   });
-
-  document.querySelector("#support-status-filter")?.addEventListener("change", async (event) => {
-    adminState.customers.status = event.target.value || "all";
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#support-type-filter")?.addEventListener("change", async (event) => {
-    adminState.customers.conversationType = event.target.value || "all";
-    await renderCurrentSection();
-  });
-
-  contentRoot.querySelectorAll("[data-thread-id]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      adminState.customers.selectedId = button.dataset.threadId || null;
+  [["#customer-list-type", "type"], ["#customer-list-country", "country"], ["#customer-list-status", "status"]].forEach(([selector, key]) => {
+    document.querySelector(selector)?.addEventListener("change", async (event) => {
+      adminState.customerList[key] = event.target.value || "all";
       await renderCurrentSection();
     });
   });
-
-  contentRoot.querySelectorAll("[data-quick-reply]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const textarea = contentRoot.querySelector("#customer-reply-form textarea");
-      if (textarea) {
-        textarea.value = button.dataset.quickReply || "";
-        textarea.focus();
-      }
-    });
-  });
-
-  document.querySelector("#thread-status-select")?.addEventListener("change", async (event) => {
-    if (!selected?.id) {
-      return;
-    }
-
-    await updateAdminSupportConversation(selected.id, {
-      status: event.target.value,
-    });
+  contentRoot.querySelectorAll("[data-customer-record]").forEach((button) => button.addEventListener("click", async () => {
+    adminState.customerList.selectedKey = button.dataset.customerRecord || null;
+    adminState.customerList.mode = "detail";
     await renderCurrentSection();
-  });
-
-  document.querySelector("#thread-resolve-button")?.addEventListener("click", async () => {
-    if (!selected?.id) {
-      return;
-    }
-
-    await updateAdminSupportConversation(selected.id, {
-      status: "resolved",
-    });
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#thread-reopen-button")?.addEventListener("click", async () => {
-    if (!selected?.id) {
-      return;
-    }
-
-    await updateAdminSupportConversation(selected.id, {
-      status: "waiting_admin",
-    });
-    await renderCurrentSection();
-  });
-
-  document.querySelector("#customer-reply-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-
-    if (!selected?.id) {
-      return;
-    }
-
-    const form = event.currentTarget;
-    const formData = new FormData(form);
-    const text = String(formData.get("text") || "").trim();
-    const file = formData.get("image");
-    let image = "";
-
-    if (file && typeof file === "object" && file.size) {
-      image = await fileToDataUrl(file);
-    }
-
-    if (!text && !image) {
-      return;
-    }
-
-    await createAdminSupportMessage(selected.id, {
-      text,
-      imageUrl: image,
-    });
-
-    form.reset();
-    await renderCurrentSection();
-  });
+  }));
 };
 
 const getCustomerOrderHistory = (conversation, orders) => {
@@ -5485,6 +4406,7 @@ const updateAdminConversationListDom = () => {
   listRoot.querySelectorAll("[data-thread-id]").forEach((button) => {
     button.addEventListener("click", async () => {
       adminState.customers.selectedId = button.dataset.threadId || null;
+      adminState.customers.detailsOpen = false;
       if (isAdminSupportCompactViewport()) {
         adminState.customers.mobileView = "chat";
       }
@@ -5596,8 +4518,8 @@ const syncAdminReplyTextareaHeight = (textarea) => {
   }
 
   textarea.style.height = "auto";
-  const maxHeight = 120;
-  const nextHeight = Math.min(Math.max(textarea.scrollHeight, 52), maxHeight);
+  const maxHeight = 140;
+  const nextHeight = Math.min(Math.max(textarea.scrollHeight, 88), maxHeight);
   textarea.style.height = `${nextHeight}px`;
   textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
 };
@@ -5615,122 +4537,53 @@ const createCustomerPanelMarkup = (selected, customerOrders = []) => {
   if (!selected) {
     return `
       <aside class="admin-panel admin-customer-panel">
-        ${renderEmptyState("Customer details", "Select a conversation to view CRM information.")}
+        <div class="admin-support-drawer-head">
+          <div><span>Customer</span><h3>Customer Details</h3></div>
+          <button class="admin-icon-button" type="button" id="support-customer-details-close" aria-label="Close customer details">&times;</button>
+        </div>
+        ${renderEmptyState("Customer details", "Select a conversation to view customer information.")}
       </aside>
     `;
   }
 
   const totalSpend = getSupportCustomerSpend(customerOrders);
   const recentOrders = customerOrders.slice(0, 3);
-  const linkedOrder = customerOrders[0]?.orderNumber || customerOrders[0]?.orderId || customerOrders[0]?.id || selected.relatedOrderNumber || "None";
 
   return `
     <aside class="admin-panel admin-customer-panel">
-      <div class="admin-customer-crm-card">
-        <section class="admin-customer-crm-hero">
-          <span class="admin-customer-avatar">${escapeHtml((selected.customerName || selected.email || "C").slice(0, 1).toUpperCase())}</span>
-          <div class="admin-customer-profile-copy">
-            <h3>${escapeHtml(selected.customerName || "Website Visitor")}</h3>
-            <p class="admin-break-anywhere">${escapeHtml(selected.email || "No email")}</p>
-            <div class="admin-customer-profile-badges">
-              <span class="admin-pill ${getStatusClass(selected.status || "open")}">${escapeHtml(
-                formatStatusLabel(selected.status || "open")
-              )}</span>
-              <span class="admin-pill">${escapeHtml(
-                formatStatusLabel(selected.customerType || selected.conversationType || "retail")
-              )}</span>
-            </div>
-          </div>
-        </section>
-
-        <section class="admin-customer-crm-section">
-          <div class="admin-customer-stat-grid">
-            <article class="admin-customer-stat-card">
-              <span>Orders</span>
-              <strong>${formatNumber(customerOrders.length)}</strong>
-            </article>
-            <article class="admin-customer-stat-card">
-              <span>Total Spend</span>
-              <strong>${escapeHtml(formatMoney(totalSpend, "USD"))}</strong>
-            </article>
-          </div>
-        </section>
-
-        <section class="admin-customer-crm-section">
-          <div class="admin-section-head">
-            <h4>Customer Info</h4>
-          </div>
-          <div class="admin-customer-crm-row"><span>Name</span><strong>${escapeHtml(selected.customerName || "Not set")}</strong></div>
-          <div class="admin-customer-crm-row"><span>Email</span><strong class="admin-break-anywhere">${escapeHtml(selected.email || "Not set")}</strong></div>
-          <div class="admin-customer-crm-row"><span>Country</span><strong>${escapeHtml(selected.country || "Not set")}</strong></div>
-          <div class="admin-customer-crm-row"><span>Company</span><strong>${escapeHtml(selected.company || "Not set")}</strong></div>
-          <div class="admin-customer-crm-row"><span>Phone</span><strong>${escapeHtml(selected.customerPhone || selected.phone || "Not set")}</strong></div>
-        </section>
-
-        <section class="admin-customer-crm-section">
-          <div class="admin-section-head">
-            <h4>Conversation Info</h4>
-          </div>
-          <div class="admin-customer-crm-row">
-            <span>Customer Status</span>
-            <select class="admin-compact-select" id="customer-profile-status">${CUSTOMER_STATUSES.map(
-              (status) =>
-                `<option value="${status}" ${(selected.customerStatus || "new") === status ? "selected" : ""}>${escapeHtml(
-                  formatStatusLabel(status)
-                )}</option>`
-            ).join("")}</select>
-          </div>
-          <div class="admin-customer-crm-row"><span>Last Activity</span><strong>${escapeHtml(
-            formatDate(selected.lastMessageAt || selected.updatedAt)
-          )}</strong></div>
-          <div class="admin-customer-crm-row"><span>Conversation Status</span><strong>${escapeHtml(
-            formatStatusLabel(selected.status || "open")
-          )}</strong></div>
-          <div class="admin-customer-crm-row"><span>Conversation Type</span><strong>${escapeHtml(
-            formatStatusLabel(selected.customerType || selected.conversationType || "retail")
-          )}</strong></div>
-          <div class="admin-customer-crm-row"><span>Linked Order</span><strong>${escapeHtml(linkedOrder)}</strong></div>
-          <div class="admin-customer-crm-row"><span>Tags</span><div class="admin-tag-list">${
-            Array.isArray(selected.tags) && selected.tags.length
-              ? selected.tags.map((tag) => `<span class="admin-tag-chip">${escapeHtml(tag)}</span>`).join("")
-              : '<span class="admin-muted">None</span>'
-          }</div></div>
-        </section>
-
-        <section class="admin-customer-crm-section">
-          <div class="admin-section-head">
-            <h4>Recent Orders</h4>
-          </div>
-          ${
-            recentOrders.length
-              ? `
-                <div class="admin-linked-record-list admin-support-order-list">
-                  ${recentOrders
-                    .map(
-                      (order) => `
-                        <button type="button" class="admin-linked-record-row" data-customer-order-id="${escapeHtml(order.id)}">
-                          <div class="admin-linked-record-main">
-                            <strong>${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
-                            <p>${escapeHtml(order.productNameSnapshot || order.productName || "Order item")}</p>
-                          </div>
-                          <div class="admin-linked-record-side">
-                            <span>${escapeHtml(
-                              formatMoney(order.totalAmount || order.subtotal || 0, order.currency || "USD")
-                            )}</span>
-                            <span class="admin-pill ${getStatusClass(order.orderStatus || order.status)}">${escapeHtml(
-                              formatStatusLabel(order.orderStatus || order.status || "pending")
-                            )}</span>
-                          </div>
-                        </button>
-                      `
-                    )
-                    .join("")}
-                </div>
-              `
-              : '<p class="admin-muted">No recent orders.</p>'
-          }
-        </section>
+      <div class="admin-support-drawer-head">
+        <div><span>Customer</span><h3>Customer Details</h3></div>
+        <button class="admin-icon-button" type="button" id="support-customer-details-close" aria-label="Close customer details">&times;</button>
       </div>
+      <div class="admin-support-drawer-profile">
+        <span class="admin-customer-avatar">${escapeHtml((selected.customerName || selected.email || "C").slice(0, 1).toUpperCase())}</span>
+        <div><h4>${escapeHtml(selected.customerName || "Website Visitor")}</h4><p class="admin-break-anywhere">${escapeHtml(selected.email || "No email")}</p></div>
+      </div>
+      <div class="admin-support-drawer-stats">
+        <div><span>Orders</span><strong>${formatNumber(customerOrders.length)}</strong></div>
+        <div><span>Total Spend</span><strong>${escapeHtml(formatMoney(totalSpend, customerOrders[0]?.currency || "USD"))}</strong></div>
+      </div>
+      <section class="admin-support-drawer-section">
+        <h4>Profile</h4>
+        <dl class="admin-support-customer-fields">
+          <div><dt>Name</dt><dd>${escapeHtml(selected.customerName || "Not set")}</dd></div>
+          <div><dt>Email</dt><dd class="admin-break-anywhere">${escapeHtml(selected.email || "Not set")}</dd></div>
+          <div><dt>Country</dt><dd>${escapeHtml(selected.country || "Not set")}</dd></div>
+          <div><dt>Company</dt><dd>${escapeHtml(selected.company || "Not set")}</dd></div>
+          <div><dt>Phone</dt><dd>${escapeHtml(selected.customerPhone || selected.phone || "Not set")}</dd></div>
+          <div><dt>Customer Type</dt><dd>${escapeHtml(formatStatusLabel(selected.customerType || selected.conversationType || "retail"))}</dd></div>
+          <div><dt>Last Activity</dt><dd>${escapeHtml(formatDate(selected.lastMessageAt || selected.updatedAt))}</dd></div>
+        </dl>
+      </section>
+      <section class="admin-support-drawer-section">
+        <h4>Recent Orders</h4>
+        ${recentOrders.length ? `<div class="admin-support-drawer-orders">${recentOrders.map((order) => `
+          <button type="button" data-customer-order-id="${escapeHtml(order.id)}">
+            <span><strong>${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong><small>${escapeHtml(formatStatusLabel(order.orderStatus || order.status || "pending"))}</small></span>
+            <strong>${escapeHtml(formatMoney(order.totalAmount || order.subtotal || 0, order.currency || "USD"))}</strong>
+          </button>
+        `).join("")}</div>` : '<p class="admin-muted">No recent orders.</p>'}
+      </section>
     </aside>
   `;
 };
@@ -5742,7 +4595,6 @@ const renderCustomersSectionView = (options = {}) => {
   const messages = adminSupportRuntime.messages;
   const customerOrders = Array.isArray(adminSupportRuntime.customerOrders) ? adminSupportRuntime.customerOrders : [];
   const detailError = adminSupportRuntime.detailError;
-  const liveLabel = adminSupportRuntime.liveLabel || getAdminSupportLiveLabel(adminSupportRuntime.liveState);
   const compactSupportViewport = isAdminSupportCompactViewport();
   const activeMobileView = compactSupportViewport
     ? selected
@@ -5753,20 +4605,20 @@ const renderCustomersSectionView = (options = {}) => {
     : "chat";
   const showThreadList = !compactSupportViewport || activeMobileView === "list";
   const showChatPanel = !compactSupportViewport || activeMobileView === "chat";
-  const showCrmPanel = !compactSupportViewport;
+  const showCustomerDrawer = Boolean(selected && adminState.customers.detailsOpen);
   const headerSummary = getSupportConversationHeaderSummary(selected, customerOrders);
 
   adminSupportRuntime.selected = selected;
   adminState.customers.mobileView = activeMobileView;
 
   contentRoot.innerHTML = `
-    <div class="admin-stack admin-support-shell ${compactSupportViewport ? "is-compact" : "is-desktop"}">
+    <div class="admin-stack admin-support-shell ${compactSupportViewport ? "is-compact" : "is-desktop"} ${showCustomerDrawer ? "has-customer-drawer" : ""}">
       <div class="admin-chat-layout admin-support-layout" data-support-view="${escapeHtml(activeMobileView)}">
         <section class="admin-panel admin-thread-panel" ${showThreadList ? "" : "hidden"}>
           <div class="admin-thread-panel-head">
             <div class="admin-panel-header admin-panel-header-compact admin-thread-panel-header">
               <div>
-                <h3>Customer Support</h3>
+                <h3>Support</h3>
                 <p class="admin-thread-count">${formatNumber(conversations.length)} active conversation${
                   conversations.length === 1 ? "" : "s"
                 }</p>
@@ -5778,20 +4630,17 @@ const renderCustomersSectionView = (options = {}) => {
                   id="support-search"
                   class="admin-search-input"
                   type="search"
-                  placeholder="Search customer, email, order"
+                  placeholder="Search conversations..."
                   value="${escapeHtml(adminState.customers.query)}"
                 >
               </label>
-              <div class="admin-thread-filter-row admin-thread-filter-row-v2">
-                <label class="admin-thread-filter">
-                  <span>Status</span>
-                  <select id="support-status-filter">
-                    <option value="all" ${adminState.customers.status === "all" ? "selected" : ""}>All</option>
-                    <option value="open" ${adminState.customers.status === "open" ? "selected" : ""}>New</option>
-                    <option value="waiting_admin" ${adminState.customers.status === "waiting_admin" ? "selected" : ""}>Waiting Reply</option>
-                    <option value="resolved" ${adminState.customers.status === "resolved" ? "selected" : ""}>Resolved</option>
-                  </select>
-                </label>
+              <div class="admin-support-filter-chips" aria-label="Conversation status filter">
+                ${[
+                  ["all", "All"],
+                  ["waiting_admin", "Waiting"],
+                  ["open", "Open"],
+                  ["resolved", "Resolved"],
+                ].map(([value, label]) => `<button type="button" data-support-status-filter="${value}" class="${adminState.customers.status === value ? "is-active" : ""}">${label}</button>`).join("")}
               </div>
             </div>
           </div>
@@ -5833,28 +4682,14 @@ const renderCustomersSectionView = (options = {}) => {
                           .toUpperCase()
                       )}</span>
                       <div class="admin-chat-header-copy">
-                        <div class="admin-chat-header-topline">
-                          <h3 class="admin-chat-header-title">${escapeHtml(selected.customerName || "Website Visitor")}</h3>
-                          <span class="admin-pill admin-chat-header-status ${getStatusClass(selected.status || "open")}">${escapeHtml(
-                            formatStatusLabel(selected.status || "open")
-                          )}</span>
-                        </div>
+                        <h3 class="admin-chat-header-title">${escapeHtml(selected.customerName || "Website Visitor")}</h3>
                         <p class="admin-chat-header-email">${escapeHtml(selected.email || "No email")}</p>
+                        <p class="admin-chat-header-context">${escapeHtml(formatStatusLabel(selected.customerType || selected.conversationType || "retail"))} &middot; ${escapeHtml(headerSummary.orderNumber)}</p>
                       </div>
-                    </div>
-                    <div class="admin-chat-header-meta">
-                      <div class="admin-chat-header-brief">
-                        <span>${escapeHtml(headerSummary.orderNumber)}</span>
-                        <strong>${escapeHtml(headerSummary.orderStatus)}</strong>
-                        <small>${escapeHtml(headerSummary.orderAmount)}</small>
-                      </div>
-                      <span id="admin-support-live-status" class="admin-chat-live-chip" data-state="${escapeHtml(
-                        adminSupportRuntime.liveState
-                      )}">${escapeHtml(liveLabel)}</span>
                     </div>
                     <div class="admin-chat-header-actions">
-                      <label>
-                        <span>Status</span>
+                      <label class="admin-chat-status-control">
+                        <span class="admin-visually-hidden">Conversation status</span>
                         <select id="thread-status-select">
                           ${SUPPORT_CONVERSATION_STATUSES.map(
                             (status) => `
@@ -5863,8 +4698,10 @@ const renderCustomersSectionView = (options = {}) => {
                           ).join("")}
                         </select>
                       </label>
-                      <button class="admin-secondary-button" type="button" id="thread-resolve-button">Mark Resolved</button>
-                      <button class="admin-secondary-button" type="button" id="thread-reopen-button">Reopen</button>
+                      ${["resolved", "closed"].includes(selected.status)
+                        ? '<button class="admin-secondary-button" type="button" id="thread-reopen-button">Reopen</button>'
+                        : '<button class="admin-secondary-button" type="button" id="thread-resolve-button">Resolve</button>'}
+                      <button class="admin-secondary-button" type="button" id="support-customer-details-toggle">Customer Details</button>
                     </div>
                   </div>
 
@@ -5878,11 +4715,11 @@ const renderCustomersSectionView = (options = {}) => {
 
                   <div class="admin-chat-footer">
                     <form class="admin-chat-composer" id="customer-reply-form">
-                      <textarea name="text" rows="1" placeholder="Write a reply to the customer"></textarea>
+                      <textarea name="text" rows="3" placeholder="Write a reply..."></textarea>
                       <div class="admin-chat-composer-actions">
                         <label class="admin-file-field admin-chat-attach">
                           <input type="file" name="image" accept="image/*">
-                          <span>Attach Image</span>
+                          <span>Attach</span>
                         </label>
                         <details class="admin-quick-replies-drawer">
                           <summary>Quick Reply</summary>
@@ -5908,7 +4745,8 @@ const renderCustomersSectionView = (options = {}) => {
           }
         </section>
 
-        <div class="admin-support-crm-wrap" ${showCrmPanel ? "" : "hidden"}>
+        <button class="admin-support-drawer-backdrop" type="button" id="support-customer-details-backdrop" aria-label="Close customer details" ${showCustomerDrawer ? "" : "hidden"}></button>
+        <div class="admin-support-crm-wrap ${showCustomerDrawer ? "is-open" : ""}" aria-hidden="${showCustomerDrawer ? "false" : "true"}">
           ${createCustomerPanelMarkup(selected, customerOrders)}
         </div>
       </div>
@@ -5939,14 +4777,29 @@ const renderCustomersSectionView = (options = {}) => {
     await renderCurrentSection();
   });
 
-  document.querySelector("#support-status-filter")?.addEventListener("change", async (event) => {
-    adminState.customers.status = event.target.value || "all";
-    await renderCurrentSection();
+  contentRoot.querySelectorAll("[data-support-status-filter]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      adminState.customers.status = button.dataset.supportStatusFilter || "all";
+      await renderCurrentSection();
+    });
   });
 
   document.querySelector("#support-mobile-back")?.addEventListener("click", () => {
     adminState.customers.mobileView = "list";
+    adminState.customers.detailsOpen = false;
     renderCustomersSectionView();
+  });
+
+  document.querySelector("#support-customer-details-toggle")?.addEventListener("click", () => {
+    adminState.customers.detailsOpen = true;
+    renderCustomersSectionView();
+  });
+
+  ["#support-customer-details-close", "#support-customer-details-backdrop"].forEach((selector) => {
+    document.querySelector(selector)?.addEventListener("click", () => {
+      adminState.customers.detailsOpen = false;
+      renderCustomersSectionView();
+    });
   });
 
   updateAdminConversationListDom();
@@ -6086,7 +4939,7 @@ const renderCustomersSectionView = (options = {}) => {
 };
 
 const reconcileCustomersSection = async () => {
-  if (adminState.activeSection !== "customers" || adminSupportRuntime.isSending || adminSupportRuntime.isMessagePolling) {
+  if (adminState.activeSection !== "support" || adminSupportRuntime.isSending || adminSupportRuntime.isMessagePolling) {
     return;
   }
 
@@ -6146,7 +4999,7 @@ const reconcileCustomersSection = async () => {
 };
 
 const pollAdminConversationList = async () => {
-  if (adminState.activeSection !== "customers" || adminSupportRuntime.isListPolling) {
+  if (adminState.activeSection !== "support" || adminSupportRuntime.isListPolling) {
     return;
   }
 
@@ -6180,7 +5033,7 @@ const pollAdminConversationList = async () => {
 
 const startAdminSupportPolling = () => {
   stopAdminSupportPolling();
-  if (adminState.activeSection !== "customers") {
+  if (adminState.activeSection !== "support") {
     return;
   }
 
@@ -6205,7 +5058,7 @@ window.addEventListener("resize", () => {
   }
 
   lastAdminSupportCompactViewport = nextCompact;
-  if (adminState.activeSection !== "customers") {
+  if (adminState.activeSection !== "support") {
     return;
   }
 
@@ -6659,34 +5512,23 @@ const renderProductEditorSection = async () => {
                   <div class="admin-panel-header">
                     <div>
                       <h4>Wholesale Price Tiers</h4>
-                      <p>Set quantity ranges and unit pricing for wholesale buyers.</p>
+                      <p>Set independent USD and HKD quantity tiers for wholesale buyers.</p>
                     </div>
                   </div>
+                  <div class="admin-settings-tab-row" role="tablist" aria-label="Wholesale tier currencies">
+                    ${["USD", "HKD"].map((currency) => `
+                      <button
+                        type="button"
+                        class="admin-settings-tab ${currency === "USD" ? "is-active" : ""}"
+                        data-tier-currency="${currency}"
+                        aria-selected="${currency === "USD" ? "true" : "false"}"
+                      >
+                        <span>${currency}</span>
+                        <small>${currency} tiers</small>
+                      </button>
+                    `).join("")}
+                  </div>
                   <div class="admin-tier-list" id="product-tier-list">
-                    ${(Array.isArray(product.b2b?.priceTiers) && product.b2b.priceTiers.length
-                      ? product.b2b.priceTiers
-                      : [{ id: "", minQuantity: product.b2b?.wholesaleMoq ?? product.moqValue ?? 1, maxQuantity: 0, unitPrice: "" }])
-                      .map(
-                        (tier, index) => `
-                          <div class="admin-tier-row" data-tier-row>
-                            <input type="hidden" data-tier-id value="${escapeHtml(tier.id || "")}">
-                            <label>
-                              Min Quantity
-                              <input type="number" data-tier-min min="1" step="1" value="${escapeHtml(tier.minQuantity ?? 1)}">
-                            </label>
-                            <label>
-                              Max Quantity
-                              <input type="number" data-tier-max min="0" step="1" value="${escapeHtml(tier.maxQuantity ?? 0)}" placeholder="0 for open ended">
-                            </label>
-                            <label>
-                              Unit Price
-                              <input type="number" data-tier-price min="0" step="0.01" value="${escapeHtml(tier.unitPrice ?? "")}">
-                            </label>
-                            <button class="admin-ghost-button" type="button" data-tier-delete aria-label="Delete wholesale price tier ${index + 1}">Delete</button>
-                          </div>
-                        `
-                      )
-                      .join("")}
                   </div>
                   <div class="admin-actions-inline">
                     <button class="admin-secondary-button" type="button" id="product-tier-add">Add Tier</button>
@@ -6872,6 +5714,14 @@ const renderProductEditorSection = async () => {
   let detailImageItems = initialDetailImages.slice();
   let isSubmittingProduct = false;
   let submitIntent = "publish";
+  let activeWholesaleTierCurrency = "USD";
+  let wholesaleTierEntries = (Array.isArray(product.b2b?.priceTiers) ? product.b2b.priceTiers : []).map((tier, index) => ({
+    id: String(tier?.id || `${product.id || "product"}-tier-${index + 1}`),
+    currency: String(tier?.currency || "USD").trim().toUpperCase() || "USD",
+    minQuantity: String(tier?.minQuantity ?? product.b2b?.wholesaleMoq ?? product.moqValue ?? 1),
+    maxQuantity: String(tier?.maxQuantity ?? 0),
+    unitPrice: String(tier?.unitPrice ?? ""),
+  }));
   const allowedUploadTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
   const maxUploadBytes = 10 * 1024 * 1024;
   const createSpecRowMarkup = (key = "", value = "") => `
@@ -6883,7 +5733,8 @@ const renderProductEditorSection = async () => {
   `;
   const createTierRowMarkup = (tier = {}) => `
     <div class="admin-tier-row" data-tier-row>
-      <input type="hidden" data-tier-id value="${escapeHtml(tier.id || "")}">
+      <input type="hidden" data-tier-id value="${escapeHtml(tier.id || `${product.id || "product"}-${String(tier.currency || activeWholesaleTierCurrency).trim().toLowerCase()}-${Date.now()}`)}">
+      <input type="hidden" data-tier-currency-value value="${escapeHtml(String(tier.currency || activeWholesaleTierCurrency).trim().toUpperCase())}">
       <label>
         Min Quantity
         <input type="number" data-tier-min min="1" step="1" value="${escapeHtml(tier.minQuantity ?? 1)}">
@@ -6899,6 +5750,49 @@ const renderProductEditorSection = async () => {
       <button class="admin-ghost-button" type="button" data-tier-delete>Delete</button>
     </div>
   `;
+  const getActiveWholesaleTierRows = () =>
+    wholesaleTierEntries.filter(
+      (tier) => String(tier.currency || "USD").trim().toUpperCase() === activeWholesaleTierCurrency
+    );
+  const syncWholesaleTierRowsFromDom = () => {
+    const preserved = wholesaleTierEntries.filter(
+      (tier) => String(tier.currency || "USD").trim().toUpperCase() !== activeWholesaleTierCurrency
+    );
+    const nextActiveRows = Array.from(tierList?.querySelectorAll("[data-tier-row]") || [])
+      .map((row, index) => ({
+        id: String(row.querySelector("[data-tier-id]")?.value || `${product.id || "product"}-${activeWholesaleTierCurrency}-tier-${index + 1}`).trim(),
+        currency: activeWholesaleTierCurrency,
+        minQuantity: String(row.querySelector("[data-tier-min]")?.value || "").trim(),
+        maxQuantity: String(row.querySelector("[data-tier-max]")?.value || "").trim(),
+        unitPrice: String(row.querySelector("[data-tier-price]")?.value || "").trim(),
+      }))
+      .filter((tier) => tier.minQuantity || tier.unitPrice || tier.maxQuantity);
+    wholesaleTierEntries = [...preserved, ...nextActiveRows];
+  };
+  const renderWholesaleTierTabs = () => {
+    document.querySelectorAll("[data-tier-currency]").forEach((button) => {
+      const isActive = String(button.dataset.tierCurrency || "").trim().toUpperCase() === activeWholesaleTierCurrency;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+  };
+  const renderWholesaleTierRows = () => {
+    if (!tierList) {
+      return;
+    }
+    const rows = getActiveWholesaleTierRows();
+    const renderedRows = rows.length
+      ? rows
+      : [{
+          id: `${product.id || "product"}-${activeWholesaleTierCurrency.toLowerCase()}-default`,
+          currency: activeWholesaleTierCurrency,
+          minQuantity: String(product.b2b?.wholesaleMoq ?? product.moqValue ?? 1),
+          maxQuantity: "0",
+          unitPrice: "",
+        }];
+    tierList.innerHTML = renderedRows.map((tier) => createTierRowMarkup(tier)).join("");
+    renderWholesaleTierTabs();
+  };
   const revokeObjectUrl = (value) => {
     if (value && value.startsWith("blob:")) {
       URL.revokeObjectURL(value);
@@ -7147,6 +6041,16 @@ const renderProductEditorSection = async () => {
     });
   });
 
+  renderWholesaleTierRows();
+
+  contentRoot.querySelectorAll("[data-tier-currency]").forEach((button) => {
+    button.addEventListener("click", () => {
+      syncWholesaleTierRowsFromDom();
+      activeWholesaleTierCurrency = String(button.dataset.tierCurrency || "USD").trim().toUpperCase() || "USD";
+      renderWholesaleTierRows();
+    });
+  });
+
   document.querySelector("#product-spec-add")?.addEventListener("click", () => {
     if (!specList) {
       return;
@@ -7160,15 +6064,15 @@ const renderProductEditorSection = async () => {
       return;
     }
 
-    tierList.insertAdjacentHTML(
-      "beforeend",
-      createTierRowMarkup({
-        id: "",
-        minQuantity: product.b2b?.wholesaleMoq ?? product.moqValue ?? 1,
-        maxQuantity: 0,
-        unitPrice: "",
-      })
-    );
+    syncWholesaleTierRowsFromDom();
+    wholesaleTierEntries.push({
+      id: `${product.id || "product"}-${activeWholesaleTierCurrency.toLowerCase()}-${Date.now()}`,
+      currency: activeWholesaleTierCurrency,
+      minQuantity: String(product.b2b?.wholesaleMoq ?? product.moqValue ?? 1),
+      maxQuantity: "0",
+      unitPrice: "",
+    });
+    renderWholesaleTierRows();
   });
 
   specList?.addEventListener("click", (event) => {
@@ -7205,27 +6109,32 @@ const renderProductEditorSection = async () => {
       return;
     }
 
-    const rows = tierList.querySelectorAll("[data-tier-row]");
+    syncWholesaleTierRowsFromDom();
+    const rows = getActiveWholesaleTierRows();
 
     if (rows.length <= 1) {
-      const row = rows[0];
-      row?.querySelector("[data-tier-id]")?.setAttribute("value", "");
-      const minInput = row?.querySelector("[data-tier-min]");
-      const maxInput = row?.querySelector("[data-tier-max]");
-      const priceInput = row?.querySelector("[data-tier-price]");
-      if (minInput) {
-        minInput.value = String(product.b2b?.wholesaleMoq ?? product.moqValue ?? 1);
-      }
-      if (maxInput) {
-        maxInput.value = "0";
-      }
-      if (priceInput) {
-        priceInput.value = "";
-      }
+      wholesaleTierEntries = wholesaleTierEntries.filter(
+        (tier) => String(tier.currency || "USD").trim().toUpperCase() !== activeWholesaleTierCurrency
+      );
+      wholesaleTierEntries.push({
+        id: "",
+        currency: activeWholesaleTierCurrency,
+        minQuantity: String(product.b2b?.wholesaleMoq ?? product.moqValue ?? 1),
+        maxQuantity: "0",
+        unitPrice: "",
+      });
+      renderWholesaleTierRows();
       return;
     }
 
-    button.closest("[data-tier-row]")?.remove();
+    const rowId = String(button.closest("[data-tier-row]")?.querySelector("[data-tier-id]")?.value || "").trim();
+    wholesaleTierEntries = wholesaleTierEntries.filter((tier) => {
+      if (String(tier.currency || "USD").trim().toUpperCase() !== activeWholesaleTierCurrency) {
+        return true;
+      }
+      return String(tier.id || "").trim() !== rowId;
+    });
+    renderWholesaleTierRows();
   });
 
   ["keywords", "functions", "scenarios", "markets"].forEach(attachChipEditor);
@@ -7489,12 +6398,14 @@ const renderProductEditorSection = async () => {
     }
     const depositValue = formData.get("b2bDepositValue") || 0;
     const paymentTerms = String(formData.get("b2bCustomPaymentTerms") || "").trim() || defaultPaymentTerms;
-    const wholesalePriceTiers = Array.from(tierList?.querySelectorAll("[data-tier-row]") || [])
-      .map((row, index) => ({
-        id: String(row.querySelector("[data-tier-id]")?.value || `${id}-tier-${index + 1}`).trim(),
-        minQuantity: String(row.querySelector("[data-tier-min]")?.value || "").trim(),
-        maxQuantity: String(row.querySelector("[data-tier-max]")?.value || "").trim(),
-        unitPrice: String(row.querySelector("[data-tier-price]")?.value || "").trim(),
+    syncWholesaleTierRowsFromDom();
+    const wholesalePriceTiers = wholesaleTierEntries
+      .map((tier, index) => ({
+        id: String(tier.id || `${id}-${String(tier.currency || "USD").trim().toLowerCase()}-tier-${index + 1}`).trim(),
+        currency: String(tier.currency || "USD").trim().toUpperCase() || "USD",
+        minQuantity: String(tier.minQuantity || "").trim(),
+        maxQuantity: String(tier.maxQuantity || "").trim(),
+        unitPrice: String(tier.unitPrice || "").trim(),
       }))
       .filter((tier) => tier.minQuantity && tier.unitPrice);
     const retailStock = formData.has("b2cRetailStock")
@@ -7864,7 +6775,7 @@ const renderWebsiteSection = async () => {
           <div class="admin-panel-header">
             <div>
               <h3>Brand</h3>
-              <p>Logo, website name, browser title, and favicon.</p>
+              <p>Logo, website name, brand identity, and favicon.</p>
             </div>
           </div>
           <div class="admin-form-grid">
@@ -7883,10 +6794,6 @@ const renderWebsiteSection = async () => {
             <label class="full">
               Brand Subtitle
               <input type="text" name="brandSubtitle" value="${escapeHtml(website.brand.subtitle || "")}">
-            </label>
-            <label class="full">
-              Browser Title
-              <input type="text" name="browserTitle" value="${escapeHtml(website.brand.browserTitle || "")}">
             </label>
             <label class="full">
               Logo Image URL
@@ -8021,8 +6928,8 @@ const renderWebsiteSection = async () => {
         <section class="admin-panel">
           <div class="admin-panel-header">
             <div>
-              <h3>Social and SEO</h3>
-              <p>Public-facing social links and metadata.</p>
+              <h3>Social Links</h3>
+              <p>Public-facing social and messaging links.</p>
             </div>
           </div>
           <div class="admin-form-grid">
@@ -8041,14 +6948,6 @@ const renderWebsiteSection = async () => {
             <label>
               X
               <input type="url" name="x" value="${escapeHtml(website.social.x || "")}">
-            </label>
-            <label class="full">
-              Meta Description
-              <textarea name="metaDescription" rows="4">${escapeHtml(website.seo.metaDescription || "")}</textarea>
-            </label>
-            <label class="full">
-              Meta Keywords
-              <textarea name="metaKeywords" rows="4">${escapeHtml(website.seo.metaKeywords || "")}</textarea>
             </label>
           </div>
         </section>
@@ -8163,7 +7062,6 @@ const renderWebsiteSection = async () => {
           logoTop: formData.get("logoTop"),
           logoBottom: formData.get("logoBottom"),
           subtitle: formData.get("brandSubtitle"),
-          browserTitle: formData.get("browserTitle"),
           logoImage,
           logoPublicId: formData.get("logoPublicId"),
           favicon,
@@ -8192,10 +7090,6 @@ const renderWebsiteSection = async () => {
           instagram: formData.get("instagram"),
           x: formData.get("x"),
         },
-        seo: {
-          metaDescription: formData.get("metaDescription"),
-          metaKeywords: formData.get("metaKeywords"),
-        },
       });
 
       applyBrand(updated);
@@ -8212,18 +7106,175 @@ const renderWebsiteSection = async () => {
   });
 };
 
+const renderSeoSection = async () => {
+  const website = await window.NorthstarStore.getWebsiteSettings();
+  const seo = website.seo || {};
+  const canonicalBaseUrl = String(seo.canonicalBaseUrl || "https://avelixlink.com").replace(/\/+$/, "");
+  const indexingEnabled = seo.allowIndexing !== false;
+
+  contentRoot.innerHTML = `
+    <form class="admin-form-stack admin-seo-settings" id="seo-settings-form">
+      <div class="admin-panel-header admin-seo-page-header">
+        <div>
+          <h3>SEO</h3>
+          <p>Manage search visibility and social metadata.</p>
+        </div>
+      </div>
+
+      <div class="admin-seo-grid">
+        <section class="admin-panel admin-seo-card">
+          <div class="admin-panel-header"><div><h3>Search Appearance</h3><p>Default homepage search result content.</p></div></div>
+          <div class="admin-form-grid">
+            <label class="full">Site Title<input type="text" name="siteTitle" value="${escapeHtml(website.brand.browserTitle || "")}" required></label>
+            <label class="full">Meta Description<textarea name="metaDescription" rows="4" required>${escapeHtml(seo.metaDescription || "")}</textarea></label>
+            <details class="full admin-seo-advanced">
+              <summary>Advanced</summary>
+              <label>Meta Keywords<textarea name="metaKeywords" rows="3">${escapeHtml(seo.metaKeywords || "")}</textarea></label>
+            </details>
+          </div>
+        </section>
+
+        <section class="admin-panel admin-seo-card">
+          <div class="admin-panel-header"><div><h3>Search Visibility</h3><p>Control whether public pages may be indexed.</p></div><span class="admin-pill ${indexingEnabled ? "status-paid" : "status-cancelled"}" id="seo-indexing-status">Indexing: ${indexingEnabled ? "Enabled" : "Disabled"}</span></div>
+          <label class="admin-payment-toggle-row admin-seo-toggle">
+            <span><strong>Allow Search Engine Indexing</strong><small>When disabled, public pages output noindex and robots.txt blocks crawling.</small></span>
+            <input type="checkbox" name="allowIndexing" ${indexingEnabled ? "checked" : ""}>
+          </label>
+        </section>
+
+        <section class="admin-panel admin-seo-card">
+          <div class="admin-panel-header"><div><h3>Canonical</h3><p>Canonical URLs are generated automatically for public pages and products.</p></div></div>
+          <div class="admin-form-grid">
+            <label class="full">Canonical Base URL<input type="url" name="canonicalBaseUrl" value="${escapeHtml(canonicalBaseUrl)}" placeholder="https://avelixlink.com" required></label>
+          </div>
+        </section>
+
+        <section class="admin-panel admin-seo-card admin-seo-social-card">
+          <div class="admin-panel-header"><div><h3>Social Sharing</h3><p>Default Open Graph content used when a page has no product-specific value.</p></div></div>
+          <div class="admin-form-grid">
+            <label class="full">OG Title<input type="text" name="ogTitle" value="${escapeHtml(seo.ogTitle || website.brand.browserTitle || "")}" required></label>
+            <label class="full">OG Description<textarea name="ogDescription" rows="4" required>${escapeHtml(seo.ogDescription || seo.metaDescription || "")}</textarea></label>
+            <label class="full">OG Image<input type="url" name="ogImage" value="${escapeHtml(seo.ogImage || website.brand.logoImage || "")}" placeholder="https://..."></label>
+          </div>
+          <div class="admin-seo-social-preview">
+            ${seo.ogImage || website.brand.logoImage ? `<img id="seo-og-preview-image" src="${escapeHtml(seo.ogImage || website.brand.logoImage)}" alt="Open Graph preview">` : '<div id="seo-og-preview-image" class="admin-image-preview placeholder">No OG image configured</div>'}
+            <div><span>Social preview</span><strong id="seo-og-preview-title">${escapeHtml(seo.ogTitle || website.brand.browserTitle || "AvelixLink")}</strong><p id="seo-og-preview-description">${escapeHtml(seo.ogDescription || seo.metaDescription || "")}</p></div>
+          </div>
+        </section>
+
+        <section class="admin-panel admin-seo-card admin-seo-sitemap-card">
+          <div class="admin-panel-header"><div><h3>Sitemap</h3><p>Generated automatically from public routes and published products.</p></div><span class="admin-pill status-paid">Active</span></div>
+          <div class="admin-seo-sitemap-row"><code>/sitemap.xml</code><a class="admin-secondary-button" href="/sitemap.xml" target="_blank" rel="noopener">Open Sitemap</a></div>
+        </section>
+      </div>
+
+      <div class="admin-actions-inline"><button class="admin-primary-button" type="submit">Save SEO</button></div>
+      <p class="admin-form-status" id="seo-settings-status" aria-live="polite"></p>
+    </form>
+  `;
+
+  const form = document.querySelector("#seo-settings-form");
+  const statusNode = document.querySelector("#seo-settings-status");
+  const indexingInput = form?.querySelector('[name="allowIndexing"]');
+  const updateIndexingStatus = () => {
+    const node = document.querySelector("#seo-indexing-status");
+    if (!node) return;
+    const enabled = Boolean(indexingInput?.checked);
+    node.textContent = `Indexing: ${enabled ? "Enabled" : "Disabled"}`;
+    node.className = `admin-pill ${enabled ? "status-paid" : "status-cancelled"}`;
+  };
+  indexingInput?.addEventListener("change", updateIndexingStatus);
+
+  const syncSocialPreview = () => {
+    const title = String(form?.elements.ogTitle?.value || "").trim();
+    const description = String(form?.elements.ogDescription?.value || "").trim();
+    const imageUrl = String(form?.elements.ogImage?.value || "").trim();
+    const titleNode = document.querySelector("#seo-og-preview-title");
+    const descriptionNode = document.querySelector("#seo-og-preview-description");
+    const imageNode = document.querySelector("#seo-og-preview-image");
+    if (titleNode) titleNode.textContent = title || "Social title preview";
+    if (descriptionNode) descriptionNode.textContent = description || "Social description preview";
+    if (imageNode?.tagName === "IMG" && imageUrl) {
+      imageNode.src = imageUrl;
+    } else if (imageNode?.tagName === "IMG" && !imageUrl) {
+      imageNode.outerHTML = '<div id="seo-og-preview-image" class="admin-image-preview placeholder">No OG image configured</div>';
+    } else if (imageNode && imageUrl) {
+      imageNode.outerHTML = `<img id="seo-og-preview-image" src="${escapeHtml(imageUrl)}" alt="Open Graph preview">`;
+    }
+  };
+  ["ogTitle", "ogDescription", "ogImage"].forEach((name) => form?.elements[name]?.addEventListener("input", syncSocialPreview));
+
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submitButton = form.querySelector('button[type="submit"]');
+    const formData = new FormData(form);
+    const rawCanonicalBaseUrl = String(formData.get("canonicalBaseUrl") || "").trim();
+    let normalizedCanonicalBaseUrl = "";
+    try {
+      const parsedCanonicalUrl = new URL(rawCanonicalBaseUrl);
+      if (!['http:', 'https:'].includes(parsedCanonicalUrl.protocol)) throw new Error();
+      normalizedCanonicalBaseUrl = parsedCanonicalUrl.origin + parsedCanonicalUrl.pathname.replace(/\/+$/, "");
+    } catch (error) {
+      statusNode.textContent = "Canonical Base URL must be a valid HTTP or HTTPS URL.";
+      statusNode.dataset.state = "error";
+      return;
+    }
+
+    submitButton.disabled = true;
+    submitButton.textContent = "Saving...";
+    statusNode.textContent = "Saving SEO settings...";
+    statusNode.dataset.state = "saving";
+    try {
+      await window.NorthstarStore.updateWebsiteSettings({
+        brand: { browserTitle: formData.get("siteTitle") },
+        seo: {
+          metaDescription: formData.get("metaDescription"),
+          metaKeywords: formData.get("metaKeywords"),
+          canonicalBaseUrl: normalizedCanonicalBaseUrl,
+          allowIndexing: formData.has("allowIndexing"),
+          ogTitle: formData.get("ogTitle"),
+          ogDescription: formData.get("ogDescription"),
+          ogImage: formData.get("ogImage"),
+        },
+      });
+      statusNode.textContent = "SEO settings saved.";
+      statusNode.dataset.state = "success";
+    } catch (error) {
+      statusNode.textContent = error?.message || "Unable to save SEO settings.";
+      statusNode.dataset.state = "error";
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = "Save SEO";
+    }
+  });
+};
+
 const renderSettingsSection = async () => {
   await renderSettingsSectionV4();
 };
 
 const renderSettingsSectionV4 = async () => {
-  const settings = await window.NorthstarStore.getSettings();
   const activeSettingsSection = SETTINGS_SECTIONS[getAdminActiveNavSection()]
     ? getAdminActiveNavSection()
     : "general-settings";
+  const persistedSettings = await window.NorthstarStore.getSettings();
+  const settings =
+    activeSettingsSection === "payment-settings" && adminState.settings.paymentDraft
+      ? {
+          ...persistedSettings,
+          ...adminState.settings.paymentDraft,
+          paymentMethodCurrencies:
+            adminState.settings.paymentDraft.paymentMethodCurrencies || persistedSettings.paymentMethodCurrencies,
+          bankTransferSettings: adminState.settings.paymentDraft.bankTransferSettings || persistedSettings.bankTransferSettings,
+        }
+      : persistedSettings;
   const meta = SETTINGS_SECTIONS[activeSettingsSection];
   const enabledPaymentMethods = getEnabledPaymentMethods(settings.paymentMethods || ["PayPal", "Bank Transfer"]);
   const enabledPaymentKeys = new Set(enabledPaymentMethods.map(normalizePaymentMethodName));
+  const paymentMethodCurrencies = settings.paymentMethodCurrencies || { paypal: ["USD"] };
+  const paypalCurrencies = Array.isArray(paymentMethodCurrencies.paypal) && paymentMethodCurrencies.paypal.length
+    ? paymentMethodCurrencies.paypal.map((currency) => String(currency || "").trim().toUpperCase())
+    : ["USD"];
   const bankTransferSettings = settings.bankTransferSettings || {};
   const bankTransferCurrencies = getBankTransferCurrencyState(bankTransferSettings);
   const configuredCurrencies = bankTransferCurrencies.filter((currency) => currency.configured);
@@ -8249,42 +7300,12 @@ const renderSettingsSectionV4 = async () => {
 
   const renderGeneralSettings = () => `
     ${renderHeader()}
-    <form class="admin-settings-shell" id="settings-form">
-      <section class="admin-panel admin-settings-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Regional Preferences</h3>
-            <p>Storefront language and theme values used across the admin shell and public site settings.</p>
-          </div>
-        </div>
-        <div class="admin-form-grid">
-          <label>
-            Website Language
-            <input type="text" name="language" value="${escapeHtml(settings.language || "")}">
-          </label>
-          <label>
-            Theme Color
-            <input type="text" name="themeColor" value="${escapeHtml(settings.themeColor || "")}">
-          </label>
-        </div>
-      </section>
-      <section class="admin-panel admin-settings-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>System Configuration</h3>
-            <p>Internal operational notes kept with the site configuration.</p>
-          </div>
-        </div>
-        <label class="full">
-          System Config
-          <textarea name="systemConfig" rows="9">${escapeHtml(settings.systemConfig || "")}</textarea>
-        </label>
-      </section>
-      <div class="admin-actions-inline">
-        <button class="admin-primary-button" type="submit">${escapeHtml(meta.submitLabel)}</button>
+    <section class="admin-panel admin-settings-panel">
+      <div class="admin-settings-empty">
+        <strong>No general settings are currently required.</strong>
+        <p>Website, SEO, payment, shipping and account configuration are managed in their dedicated sections.</p>
       </div>
-      <p class="admin-form-status" id="settings-form-status"></p>
-    </form>
+    </section>
   `;
 
   const renderAccountSettings = () => `
@@ -8347,13 +7368,16 @@ const renderSettingsSectionV4 = async () => {
         </div>
         <div class="admin-payment-method-list">
           ${ADMIN_PAYMENT_METHOD_OPTIONS.map((method) => {
-            const state = getPaymentSettingsMethodState(method, enabledPaymentKeys, bankTransferSettings);
+            const state = getPaymentSettingsMethodState(method, enabledPaymentKeys, {
+              ...bankTransferSettings,
+              __paypalCurrencies: paypalCurrencies,
+            });
             return `
               <label class="admin-payment-method-row ${state.disabled ? "is-disabled" : ""}">
                 <div class="admin-payment-method-info">
                   <div class="admin-payment-method-heading">
                     <h4>${escapeHtml(method.label)}</h4>
-                    <span class="admin-method-status-badge ${state.status === "Configured" ? "is-success" : state.status === "Incomplete" ? "is-warning" : ""}">${escapeHtml(state.status)}</span>
+                    <span class="admin-method-status-badge ${state.status.startsWith("Configured") ? "is-success" : state.status === "Incomplete" ? "is-warning" : ""}">${escapeHtml(state.status)}</span>
                   </div>
                   <p>${escapeHtml(state.note)}</p>
                 </div>
@@ -8372,13 +7396,32 @@ const renderSettingsSectionV4 = async () => {
             `;
           }).join("")}
         </div>
+        <div class="admin-form-grid">
+          <fieldset class="full">
+            <legend>PayPal Supported Currencies</legend>
+            <div class="admin-checkbox-cluster">
+              ${["USD", "HKD"].map((currency) => `
+                <label class="admin-checkbox-field">
+                  <input
+                    type="checkbox"
+                    name="paypalCurrencies"
+                    value="${currency}"
+                    ${paypalCurrencies.includes(currency) ? "checked" : ""}
+                  >
+                  <span>${currency}</span>
+                </label>
+              `).join("")}
+            </div>
+            <p class="admin-field-hint">Only currencies selected here can show PayPal on checkout and payment pages.</p>
+          </fieldset>
+        </div>
       </section>
 
       <section class="admin-panel admin-settings-panel">
         <div class="admin-panel-header">
           <div>
-            <h3>Bank Transfer Accounts</h3>
-            <p>Configure the receiving account shown to customers when Bank Transfer is selected.</p>
+            <h3>SWIFT Bank Transfer Accounts</h3>
+            <p>Configure the receiving account shown to customers when SWIFT International Wire Transfer is selected.</p>
           </div>
         </div>
         <div class="admin-settings-summary-row">
@@ -8394,7 +7437,7 @@ const renderSettingsSectionV4 = async () => {
         ${bankTransferEnabled && !configuredCurrencies.length ? `
           <div class="admin-settings-warning">
             <strong>Configuration needed</strong>
-            <p>Bank Transfer is enabled, but no complete receiving account is available yet. Customers will be blocked from incomplete bank instructions until one currency is fully configured.</p>
+            <p>Bank Transfer is enabled, but no complete SWIFT receiving account is available yet. Customers will be blocked from incomplete bank instructions until one currency is fully configured.</p>
           </div>
         ` : ""}
         <div class="admin-settings-tab-row" role="tablist" aria-label="Bank transfer currencies">
@@ -8413,20 +7456,42 @@ const renderSettingsSectionV4 = async () => {
         <div class="admin-payment-account-shell">
           <div class="admin-payment-account-header">
             <div>
-              <h4>${escapeHtml(activeCurrencyConfig.label)} Receiving Account</h4>
-              <p>Only this currency form is shown at a time to keep real banking details readable.</p>
+              <h4>${escapeHtml(activeCurrencyConfig.label)} SWIFT Receiving Account</h4>
+              <p>Configure the real receiving account used for ${escapeHtml(activeCurrencyConfig.label)} SWIFT transfers.</p>
             </div>
           </div>
           <div class="admin-form-grid">
             ${activeCurrencyFields.map((field) => `
-              <label class="${field.full ? "full" : ""}">
-                ${escapeHtml(field.label)}
-                <input
-                  type="text"
-                  name="${escapeHtml(field.name)}"
-                  value="${escapeHtml(activeCurrencyConfig.details[field.prop] || "")}"
-                >
-              </label>
+              ${
+                field.type === "checkbox"
+                  ? `
+                    <label class="admin-checkbox-field full">
+                      <input
+                        type="checkbox"
+                        name="${escapeHtml(field.name)}"
+                        ${activeCurrencyConfig.details[field.prop] ? "checked" : ""}
+                      >
+                      <span>${escapeHtml(field.label)}</span>
+                    </label>
+                  `
+                  : field.type === "textarea"
+                    ? `
+                      <label class="${field.full ? "full" : ""}">
+                        ${escapeHtml(field.label)}
+                        <textarea name="${escapeHtml(field.name)}" rows="3">${escapeHtml(activeCurrencyConfig.details[field.prop] || "")}</textarea>
+                      </label>
+                    `
+                    : `
+                      <label class="${field.full ? "full" : ""}">
+                        ${escapeHtml(field.label)}
+                        <input
+                          type="text"
+                          name="${escapeHtml(field.name)}"
+                          value="${escapeHtml(activeCurrencyConfig.details[field.prop] || "")}"
+                        >
+                      </label>
+                    `
+              }
             `).join("")}
           </div>
         </div>
@@ -8451,6 +7516,11 @@ const renderSettingsSectionV4 = async () => {
 
   contentRoot.querySelectorAll("[data-bank-currency]")?.forEach((tabButton) => {
     tabButton.addEventListener("click", () => {
+      const currentForm = document.querySelector("#settings-form");
+      if (currentForm && activeSettingsSection === "payment-settings") {
+        const formData = new FormData(currentForm);
+        adminState.settings.paymentDraft = buildPaymentSettingsDraft(formData, bankTransferSettings);
+      }
       adminState.settings.bankTransferCurrency = normalizeCurrencyCode(tabButton.dataset.bankCurrency);
       renderSettingsSectionV4().catch((error) => console.error("[admin] settings rerender failed", error));
     });
@@ -8477,7 +7547,6 @@ const renderSettingsSectionV4 = async () => {
     }
 
     try {
-      const selectedPaymentMethods = getEnabledPaymentMethods(formData.getAll("paymentMethods"));
       const partial =
         activeSettingsSection === "general-settings"
           ? {
@@ -8491,31 +7560,10 @@ const renderSettingsSectionV4 = async () => {
                 adminPassword: formData.get("adminPassword"),
                 recoveryEmail: formData.get("recoveryEmail"),
               }
-            : {
-                paymentMethods: selectedPaymentMethods,
-                bankTransferSettings: {
-                  providerName: String(bankTransferSettings.providerName || "").trim(),
-                  usd: {
-                    bankName: formData.get("usdBankName") ?? bankTransferSettings?.usd?.bankName ?? "",
-                    accountName: formData.get("usdAccountName") ?? bankTransferSettings?.usd?.accountName ?? "",
-                    accountNumber: formData.get("usdAccountNumber") ?? bankTransferSettings?.usd?.accountNumber ?? "",
-                    swiftCode: formData.get("usdSwiftCode") ?? bankTransferSettings?.usd?.swiftCode ?? "",
-                  },
-                  eur: {
-                    bankName: formData.get("eurBankName") ?? bankTransferSettings?.eur?.bankName ?? "",
-                    accountName: formData.get("eurAccountName") ?? bankTransferSettings?.eur?.accountName ?? "",
-                    iban: formData.get("eurIban") ?? bankTransferSettings?.eur?.iban ?? "",
-                  },
-                  gbp: {
-                    bankName: formData.get("gbpBankName") ?? bankTransferSettings?.gbp?.bankName ?? "",
-                    accountName: formData.get("gbpAccountName") ?? bankTransferSettings?.gbp?.accountName ?? "",
-                    accountNumber: formData.get("gbpAccountNumber") ?? bankTransferSettings?.gbp?.accountNumber ?? "",
-                    sortCode: formData.get("gbpSortCode") ?? bankTransferSettings?.gbp?.sortCode ?? "",
-                  },
-                },
-              };
+            : buildPaymentSettingsDraft(formData, bankTransferSettings);
 
       const updatedSettings = await window.NorthstarStore.updateSettings(partial);
+      adminState.settings.paymentDraft = null;
       if (updatedSettings?.reauthRequired) {
         showLogin();
         return;
@@ -8550,7 +7598,7 @@ const renderCurrentSection = async () => {
     return;
   }
 
-  if (adminState.activeSection !== "customers") {
+  if (adminState.activeSection !== "support") {
     stopAdminSupportLiveSync();
   }
 
@@ -8581,8 +7629,13 @@ const renderCurrentSection = async () => {
     return;
   }
 
-  if (sectionTarget === "customers") {
+  if (sectionTarget === "support") {
     await renderCustomersSection();
+    return;
+  }
+
+  if (sectionTarget === "customers") {
+    await renderCustomerListSection();
     return;
   }
 
@@ -8598,6 +7651,11 @@ const renderCurrentSection = async () => {
 
   if (sectionTarget === "website") {
     await renderWebsiteSection();
+    return;
+  }
+
+  if (sectionTarget === "seo") {
+    await renderSeoSection();
     return;
   }
 
@@ -8627,7 +7685,7 @@ const boot = async () => {
 };
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState !== "visible" || adminState.activeSection !== "customers") {
+  if (document.visibilityState !== "visible" || adminState.activeSection !== "support") {
     return;
   }
 
@@ -8636,7 +7694,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 window.addEventListener("online", () => {
-  if (adminState.activeSection === "customers") {
+  if (adminState.activeSection === "support") {
     setAdminSupportLiveState("reconnecting");
     reconcileCustomersSection();
     pollAdminConversationList();
@@ -8644,7 +7702,7 @@ window.addEventListener("online", () => {
 });
 
 window.addEventListener("offline", () => {
-  if (adminState.activeSection === "customers") {
+  if (adminState.activeSection === "support") {
     setAdminSupportLiveState("offline");
   }
 });
