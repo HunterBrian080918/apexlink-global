@@ -90,9 +90,7 @@ const adminState = {
     expandedGroups: loadNavGroupState(),
     drawerOpen: false,
   },
-  settings: {
-    bankTransferCurrency: "usd",
-  },
+  settings: {},
   dashboard: {
     revenueRange: 7,
   },
@@ -1023,11 +1021,6 @@ const ADMIN_PAYMENT_METHOD_OPTIONS = [
     id: "bank-transfer",
     label: "Bank Transfer",
     description: "Receive SWIFT international wire payments through WorldFirst",
-  },
-  {
-    id: "wise",
-    label: "Wise",
-    description: "Accept Wise payments",
   },
   {
     id: "credit-card",
@@ -2771,8 +2764,6 @@ const getSupportConversationHeaderSummary = (selected, customerOrders = []) => {
 const getAdminConversationContextLabel = (thread) =>
   String(getAdminConversationContext(thread) || "Support conversation").replace(/鈥\?/g, "•").replace(/\s+•\s+/g, " • ");
 
-const renderDashboardSection = async () => renderDashboardSectionV2();
-
 async function renderDashboardSectionV2() {
   renderLoading();
 
@@ -2988,47 +2979,158 @@ async function renderDashboardSectionV2() {
   }
 }
 
+const getAdminOrderDateGroup = (value) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return { key: "unknown", label: "Date unavailable" };
+  }
+
+  const key = [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, "0"),
+    String(parsed.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  return {
+    key,
+    label: parsed.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
+  };
+};
+
+const groupAdminOrdersByDate = (orders) => {
+  const groups = new Map();
+
+  orders.forEach((order) => {
+    const dateGroup = getAdminOrderDateGroup(order.createdAt);
+    if (!groups.has(dateGroup.key)) {
+      groups.set(dateGroup.key, { ...dateGroup, orders: [] });
+    }
+    groups.get(dateGroup.key).orders.push(order);
+  });
+
+  return Array.from(groups.values());
+};
+
+const getAdminOrderTimelineState = (order) => {
+  const paymentStatus = normalizeStatusValue(order.paymentStatus);
+  const shippingStatus = normalizeStatusValue(order.shippingStatus);
+  const orderStatus = normalizeStatusValue(order.orderStatus);
+  const paymentComplete = ["paid", "deposit_paid", "partially_paid"].includes(paymentStatus);
+  const fulfillmentStarted =
+    ["preparing", "packed", "shipped", "in_transit", "delivered"].includes(shippingStatus) ||
+    [
+      "processing",
+      "deposit_paid",
+      "in_production",
+      "quality_inspection",
+      "awaiting_balance",
+      "balance_paid",
+      "ready_to_ship",
+      "shipped",
+      "delivered",
+      "completed",
+    ].includes(orderStatus);
+  const fulfillmentComplete =
+    shippingStatus === "delivered" || ["delivered", "completed"].includes(orderStatus);
+
+  return { paymentComplete, fulfillmentStarted, fulfillmentComplete };
+};
+
+const renderAdminOrderTimeline = (order) => {
+  const timeline = getAdminOrderTimelineState(order);
+  const paymentClass = timeline.paymentComplete ? "is-complete" : "is-pending";
+  const fulfillmentClass = timeline.fulfillmentComplete
+    ? "is-complete"
+    : timeline.fulfillmentStarted
+      ? "is-active"
+      : "is-pending";
+
+  return `
+    <div class="admin-order-stage-line" aria-label="Order progress: Created, Payment, Fulfillment">
+      <span class="admin-order-stage is-complete"><i aria-hidden="true"></i><small>Created</small></span>
+      <span class="admin-order-stage ${paymentClass}"><i aria-hidden="true"></i><small>Payment</small></span>
+      <span class="admin-order-stage ${fulfillmentClass}"><i aria-hidden="true"></i><small>Fulfillment</small></span>
+    </div>
+  `;
+};
+
+const renderAdminOrderCard = (order) => {
+  const itemCount = getAdminOrderItemCount(order);
+  return `
+    <article class="admin-order-main-card">
+      <div class="admin-order-card-cell admin-order-card-identity">
+        <span class="admin-order-mobile-label">Order #</span>
+        <strong class="admin-mono">${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</strong>
+        ${renderAdminOrderTimeline(order)}
+      </div>
+      <div class="admin-order-card-cell">
+        <span class="admin-order-mobile-label">Customer</span>
+        <strong>${escapeHtml(order.customerName || "Unknown Customer")}</strong>
+        <small>${escapeHtml(formatStatusLabel(order.purchaseMode || "retail"))}</small>
+      </div>
+      <div class="admin-order-card-cell">
+        <span class="admin-order-mobile-label">Items</span>
+        <strong>${formatNumber(itemCount)}</strong>
+        <small>${itemCount === 1 ? "item" : "items"}</small>
+      </div>
+      <div class="admin-order-card-cell">
+        <span class="admin-order-mobile-label">Total</span>
+        <strong>${escapeHtml(order.totalAmount || order.subtotal || "-")}</strong>
+      </div>
+      <div class="admin-order-card-cell">
+        <span class="admin-order-mobile-label">Order Status</span>
+        <span class="admin-pill ${getAdminPillStatusClass(order.orderStatus)}">${escapeHtml(formatStatusLabel(order.orderStatus || "pending"))}</span>
+      </div>
+      <div class="admin-order-card-cell">
+        <span class="admin-order-mobile-label">Payment Status</span>
+        <span class="admin-pill ${getAdminPillStatusClass(order.paymentStatus)}">${escapeHtml(formatPaymentStatusLabel(order.paymentStatus || "unpaid"))}</span>
+      </div>
+      <div class="admin-order-card-cell">
+        <span class="admin-order-mobile-label">Fulfillment</span>
+        <span class="admin-pill ${getAdminPillStatusClass(order.shippingStatus)}">${escapeHtml(formatStatusLabel(order.shippingStatus || "not_started"))}</span>
+      </div>
+      <div class="admin-order-card-cell admin-order-card-action">
+        <span class="admin-order-mobile-label">Action</span>
+        <button class="admin-secondary-button admin-table-action" type="button" data-order-id="${escapeHtml(order.id)}">View</button>
+      </div>
+    </article>
+  `;
+};
+
 const renderOrderListMarkup = (orders) =>
   orders.length
     ? `
-      <div class="admin-table-shell admin-commerce-table-shell">
-        <table class="admin-table admin-commerce-table admin-orders-table">
-          <thead>
-            <tr>
-              <th>Order #</th>
-              <th>Customer</th>
-              <th>Items</th>
-              <th>Total</th>
-              <th>Order Status</th>
-              <th>Payment Status</th>
-              <th>Fulfillment</th>
-              <th>Created</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${orders
-              .map(
-                (order) => `
-                  <tr>
-                    <td class="admin-mono admin-table-strong">${escapeHtml(order.orderNumber || order.orderId || order.id || "-")}</td>
-                    <td>
-                      <strong>${escapeHtml(order.customerName || "Unknown Customer")}</strong>
-                      <small>${escapeHtml(formatStatusLabel(order.purchaseMode || "retail"))}</small>
-                    </td>
-                    <td>${escapeHtml(`${getAdminOrderItemCount(order)} item${getAdminOrderItemCount(order) === 1 ? "" : "s"}`)}</td>
-                    <td class="admin-table-strong">${escapeHtml(order.totalAmount || order.subtotal || "-")}</td>
-                    <td><span class="admin-pill ${getAdminPillStatusClass(order.orderStatus)}">${escapeHtml(formatStatusLabel(order.orderStatus || "pending"))}</span></td>
-                    <td><span class="admin-pill ${getAdminPillStatusClass(order.paymentStatus)}">${escapeHtml(formatPaymentStatusLabel(order.paymentStatus || "unpaid"))}</span></td>
-                    <td><span class="admin-pill ${getAdminPillStatusClass(order.shippingStatus)}">${escapeHtml(formatStatusLabel(order.shippingStatus || "not_started"))}</span></td>
-                    <td>${escapeHtml(formatShortDate(order.createdAt))}</td>
-                    <td><button class="admin-secondary-button admin-table-action" type="button" data-order-id="${escapeHtml(order.id)}">View</button></td>
-                  </tr>
-                `
-              )
-              .join("")}
-          </tbody>
-        </table>
+      <div class="admin-order-date-groups">
+        ${groupAdminOrdersByDate(orders)
+          .map(
+            (group) => `
+              <section class="admin-order-date-group">
+                <header class="admin-order-date-header">
+                  <span class="admin-order-date-icon" aria-hidden="true"></span>
+                  <strong>${escapeHtml(group.label)}</strong>
+                  <span>${formatNumber(group.orders.length)} ${group.orders.length === 1 ? "order" : "orders"}</span>
+                </header>
+                <div class="admin-order-group-body">
+                  <div class="admin-order-group-labels" aria-hidden="true">
+                    <span>Order #</span>
+                    <span>Customer</span>
+                    <span>Items</span>
+                    <span>Total</span>
+                    <span>Order Status</span>
+                    <span>Payment Status</span>
+                    <span>Fulfillment</span>
+                    <span>Action</span>
+                  </div>
+                  ${group.orders.map(renderAdminOrderCard).join("")}
+                </div>
+              </section>
+            `
+          )
+          .join("")}
       </div>
     `
     : renderEmptyState("No orders yet", "Order records will appear here once customers place orders.");
@@ -3645,48 +3747,158 @@ const renderOrderDetailSection = async () => {
   bindOrderDetailInteractions(selected);
 };
 
+const getAdminPaymentDateGroup = (value) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return { key: "unknown", label: "Date unavailable" };
+  }
+
+  const key = [
+    parsed.getFullYear(),
+    String(parsed.getMonth() + 1).padStart(2, "0"),
+    String(parsed.getDate()).padStart(2, "0"),
+  ].join("-");
+
+  return {
+    key,
+    label: parsed.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }),
+  };
+};
+
+const groupAdminPaymentsByDate = (payments) => {
+  const groups = new Map();
+
+  payments.forEach((payment) => {
+    const dateGroup = getAdminPaymentDateGroup(payment.createdAt);
+    if (!groups.has(dateGroup.key)) {
+      groups.set(dateGroup.key, { ...dateGroup, payments: [] });
+    }
+    groups.get(dateGroup.key).payments.push(payment);
+  });
+
+  return Array.from(groups.values());
+};
+
+const getAdminPaymentStageState = (payment) => {
+  const status = normalizeStatusValue(payment.status);
+  const settledStatuses = new Set(["paid", "confirmed", "deposit_paid", "partially_paid", "refunded", "partially_refunded"]);
+  const settlementComplete = settledStatuses.has(status);
+  const verificationComplete = settlementComplete;
+  const verificationActive =
+    !verificationComplete &&
+    (status === "payment_submitted" ||
+      (isBankTransferPaymentRecord(payment) && status === "pending") ||
+      status === "failed");
+
+  return { verificationActive, verificationComplete, settlementComplete };
+};
+
+const renderAdminPaymentStageLine = (payment) => {
+  const stage = getAdminPaymentStageState(payment);
+  const verificationClass = stage.verificationComplete
+    ? "is-complete"
+    : stage.verificationActive
+      ? "is-active"
+      : "is-pending";
+  const settlementClass = stage.settlementComplete ? "is-complete" : "is-pending";
+
+  return `
+    <div class="admin-payment-stage-line" aria-label="Payment progress: Created, Verification, Settlement">
+      <span class="admin-payment-stage is-complete"><i aria-hidden="true"></i><small>Created</small></span>
+      <span class="admin-payment-stage ${verificationClass}"><i aria-hidden="true"></i><small>Verification</small></span>
+      <span class="admin-payment-stage ${settlementClass}"><i aria-hidden="true"></i><small>Settlement</small></span>
+    </div>
+  `;
+};
+
+const renderAdminPaymentCard = (payment) => {
+  const transactionReference =
+    payment.transactionId || payment.paypalCaptureId || payment.providerReference || payment.paypalOrderId || "-";
+  return `
+    <article class="admin-payment-main-card">
+      <div class="admin-payment-card-cell admin-payment-card-identity">
+        <span class="admin-payment-mobile-label">Payment ID</span>
+        <strong class="admin-mono">${escapeHtml(payment.paymentId || payment.id || "-")}</strong>
+        ${renderAdminPaymentStageLine(payment)}
+      </div>
+      <div class="admin-payment-card-cell">
+        <span class="admin-payment-mobile-label">Order #</span>
+        <strong class="admin-mono">${escapeHtml(payment.orderNumberDisplay || payment.orderId || "-")}</strong>
+      </div>
+      <div class="admin-payment-card-cell">
+        <span class="admin-payment-mobile-label">Customer</span>
+        <strong>${escapeHtml(payment.customerDisplay || payment.customer || "Unknown Customer")}</strong>
+        ${payment.linkedOrder?.purchaseMode ? `<small>${escapeHtml(formatStatusLabel(payment.linkedOrder.purchaseMode))}</small>` : ""}
+      </div>
+      <div class="admin-payment-card-cell">
+        <span class="admin-payment-mobile-label">Payment Type</span>
+        <strong>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</strong>
+      </div>
+      <div class="admin-payment-card-cell">
+        <span class="admin-payment-mobile-label">Method</span>
+        <strong>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</strong>
+      </div>
+      <div class="admin-payment-card-cell admin-payment-card-amount">
+        <span class="admin-payment-mobile-label">Amount</span>
+        <strong>${escapeHtml(formatMoney(payment.amount, payment.currency))}</strong>
+      </div>
+      <div class="admin-payment-card-cell">
+        <span class="admin-payment-mobile-label">Currency</span>
+        <strong>${escapeHtml(String(payment.currency || "USD").toUpperCase())}</strong>
+      </div>
+      <div class="admin-payment-card-cell">
+        <span class="admin-payment-mobile-label">Status</span>
+        <span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span>
+        ${payment.paidAt ? `<small>Paid ${escapeHtml(formatDate(payment.paidAt))}</small>` : ""}
+      </div>
+      <div class="admin-payment-card-cell admin-payment-card-reference">
+        <span class="admin-payment-mobile-label">Transaction Reference</span>
+        <strong class="admin-mono">${escapeHtml(transactionReference)}</strong>
+      </div>
+      <div class="admin-payment-card-cell admin-payment-card-action">
+        <span class="admin-payment-mobile-label">Action</span>
+        <button class="admin-secondary-button admin-table-action" type="button" data-payment-view="${escapeHtml(payment.id)}">View</button>
+      </div>
+    </article>
+  `;
+};
+
 const renderPaymentListMarkup = (payments) =>
   payments.length
     ? `
-      <div class="admin-table-shell admin-commerce-table-shell">
-        <table class="admin-table admin-commerce-table admin-payments-table">
-          <thead>
-            <tr>
-              <th>Payment ID</th>
-              <th>Order #</th>
-              <th>Customer</th>
-              <th>Payment Type</th>
-              <th>Method</th>
-              <th>Amount</th>
-              <th>Currency</th>
-              <th>Status</th>
-              <th>Transaction Reference</th>
-              <th>Paid At</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${payments
-              .map(
-                (payment) => `
-                  <tr>
-                    <td class="admin-mono admin-table-strong">${escapeHtml(payment.paymentId || payment.id || "-")}</td>
-                    <td class="admin-mono">${escapeHtml(payment.orderNumberDisplay || payment.orderId || "-")}</td>
-                    <td>${escapeHtml(payment.customerDisplay || payment.customer || "Unknown Customer")}</td>
-                    <td>${escapeHtml(formatPaymentTypeLabel(payment.paymentType))}</td>
-                    <td>${escapeHtml(formatPaymentMethodLabel(payment.paymentMethod))}</td>
-                    <td class="admin-table-strong">${escapeHtml(formatMoney(payment.amount, payment.currency))}</td>
-                    <td>${escapeHtml(payment.currency || "USD")}</td>
-                    <td><span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span></td>
-                    <td class="admin-mono admin-break-anywhere">${escapeHtml(payment.transactionId || payment.paypalCaptureId || payment.providerReference || "-")}</td>
-                    <td>${escapeHtml(payment.paidAt ? formatDate(payment.paidAt) : "-")}</td>
-                    <td><button class="admin-secondary-button admin-table-action" type="button" data-payment-view="${escapeHtml(payment.id)}">View</button></td>
-                  </tr>
-                `
-              )
-              .join("")}
-          </tbody>
-        </table>
+      <div class="admin-payment-date-groups">
+        ${groupAdminPaymentsByDate(payments)
+          .map(
+            (group) => `
+              <section class="admin-payment-date-group">
+                <header class="admin-payment-date-header">
+                  <span class="admin-payment-date-icon" aria-hidden="true"></span>
+                  <strong>${escapeHtml(group.label)}</strong>
+                  <span>${formatNumber(group.payments.length)} ${group.payments.length === 1 ? "payment" : "payments"}</span>
+                </header>
+                <div class="admin-payment-group-body">
+                  <div class="admin-payment-group-labels" aria-hidden="true">
+                    <span>Payment ID</span>
+                    <span>Order #</span>
+                    <span>Customer</span>
+                    <span>Payment Type</span>
+                    <span>Method</span>
+                    <span>Amount</span>
+                    <span>Currency</span>
+                    <span>Status</span>
+                    <span>Transaction Reference</span>
+                    <span>Action</span>
+                  </div>
+                  ${group.payments.map(renderAdminPaymentCard).join("")}
+                </div>
+              </section>
+            `
+          )
+          .join("")}
       </div>
     `
     : renderEmptyState("No payment records yet", "Payment records linked to customer orders will appear here.");
@@ -4007,7 +4219,7 @@ const renderPaymentsSection = async () => {
       <section class="admin-panel admin-commerce-filter-panel">
         <div class="admin-panel-header">
           <div>
-            <h3>Financial Transactions</h3>
+            <h3>Payment Records</h3>
             <p>Review individual payment records, settlement references, and verification status.</p>
           </div>
           ${
@@ -7258,16 +7470,7 @@ const renderSettingsSectionV4 = async () => {
     ? getAdminActiveNavSection()
     : "general-settings";
   const persistedSettings = await window.NorthstarStore.getSettings();
-  const settings =
-    activeSettingsSection === "payment-settings" && adminState.settings.paymentDraft
-      ? {
-          ...persistedSettings,
-          ...adminState.settings.paymentDraft,
-          paymentMethodCurrencies:
-            adminState.settings.paymentDraft.paymentMethodCurrencies || persistedSettings.paymentMethodCurrencies,
-          bankTransferSettings: adminState.settings.paymentDraft.bankTransferSettings || persistedSettings.bankTransferSettings,
-        }
-      : persistedSettings;
+  const settings = persistedSettings;
   const meta = SETTINGS_SECTIONS[activeSettingsSection];
   const enabledPaymentMethods = getEnabledPaymentMethods(settings.paymentMethods || ["PayPal", "Bank Transfer"]);
   const enabledPaymentKeys = new Set(enabledPaymentMethods.map(normalizePaymentMethodName));
@@ -7278,11 +7481,6 @@ const renderSettingsSectionV4 = async () => {
   const bankTransferSettings = settings.bankTransferSettings || {};
   const bankTransferCurrencies = getBankTransferCurrencyState(bankTransferSettings);
   const configuredCurrencies = bankTransferCurrencies.filter((currency) => currency.configured);
-  const activeCurrency = bankTransferCurrencies.some((currency) => currency.key === adminState.settings.bankTransferCurrency)
-    ? adminState.settings.bankTransferCurrency
-    : "usd";
-  const activeCurrencyConfig = bankTransferCurrencies.find((currency) => currency.key === activeCurrency) || bankTransferCurrencies[0];
-  const activeCurrencyFields = BANK_TRANSFER_ACCOUNT_FIELDS[activeCurrencyConfig?.key || "usd"] || [];
   const bankTransferEnabled = enabledPaymentKeys.has("bank transfer");
   const bankTransferSummary = configuredCurrencies.length
     ? configuredCurrencies.map((currency) => currency.label).join(", ")
@@ -7356,153 +7554,257 @@ const renderSettingsSectionV4 = async () => {
     </section>
   `;
 
-  const renderPaymentSettings = () => `
-    ${renderHeader()}
-    <form class="admin-settings-shell" id="settings-form">
-      <section class="admin-panel admin-settings-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>Payment Methods</h3>
-            <p>Enable only the payment providers that are ready to appear in checkout and customer payment flows.</p>
-          </div>
-        </div>
-        <div class="admin-payment-method-list">
-          ${ADMIN_PAYMENT_METHOD_OPTIONS.map((method) => {
-            const state = getPaymentSettingsMethodState(method, enabledPaymentKeys, {
-              ...bankTransferSettings,
-              __paypalCurrencies: paypalCurrencies,
-            });
-            return `
-              <label class="admin-payment-method-row ${state.disabled ? "is-disabled" : ""}">
-                <div class="admin-payment-method-info">
-                  <div class="admin-payment-method-heading">
-                    <h4>${escapeHtml(method.label)}</h4>
-                    <span class="admin-method-status-badge ${state.status.startsWith("Configured") ? "is-success" : state.status === "Incomplete" ? "is-warning" : ""}">${escapeHtml(state.status)}</span>
-                  </div>
-                  <p>${escapeHtml(state.note)}</p>
-                </div>
-                <span class="admin-switch ${state.disabled ? "is-disabled" : ""}" aria-hidden="true">
-                  <input
-                    type="checkbox"
-                    name="${state.disabled ? "" : "paymentMethods"}"
-                    value="${escapeHtml(method.label)}"
-                    ${state.enabled ? "checked" : ""}
-                    ${state.disabled ? "disabled" : ""}
-                  >
-                  <span class="admin-switch-track"></span>
-                  <span class="admin-switch-thumb"></span>
-                </span>
+  const renderPaymentSettings = () => {
+    const methodsById = new Map(ADMIN_PAYMENT_METHOD_OPTIONS.map((method) => [method.id, method]));
+    const paypalMethod = methodsById.get("paypal");
+    const bankTransferMethod = methodsById.get("bank-transfer");
+    const futureMethods = ADMIN_PAYMENT_METHOD_OPTIONS.filter((method) =>
+      ["credit-card", "cryptocurrency"].includes(method.id)
+    );
+    const providerStateInput = {
+      ...bankTransferSettings,
+      __paypalCurrencies: paypalCurrencies,
+    };
+    const paypalState = getPaymentSettingsMethodState(paypalMethod, enabledPaymentKeys, providerStateInput);
+    const bankTransferState = getPaymentSettingsMethodState(bankTransferMethod, enabledPaymentKeys, providerStateInput);
+    const settlementProvider = String(
+      bankTransferSettings.settlementChannel || bankTransferSettings.providerName || "WorldFirst"
+    ).trim();
+
+    const renderProviderToggle = (method, state) => `
+      <label class="admin-payment-accordion-toggle" data-payment-provider-toggle aria-label="Enable ${escapeHtml(method.label)}">
+        <span class="admin-switch">
+          <input
+            type="checkbox"
+            name="paymentMethods"
+            value="${escapeHtml(method.label)}"
+            ${state.enabled ? "checked" : ""}
+          >
+          <span class="admin-switch-track"></span>
+          <span class="admin-switch-thumb"></span>
+        </span>
+      </label>
+    `;
+
+    const renderAccountFields = (currency) => {
+      const fields = BANK_TRANSFER_ACCOUNT_FIELDS[currency.key] || [];
+      return fields.map((field) => `
+        ${
+          field.type === "checkbox"
+            ? `
+              <label class="admin-checkbox-field full">
+                <input
+                  type="checkbox"
+                  name="${escapeHtml(field.name)}"
+                  ${currency.details[field.prop] ? "checked" : ""}
+                >
+                <span>${escapeHtml(field.label)}</span>
               </label>
-            `;
-          }).join("")}
-        </div>
-        <div class="admin-form-grid">
-          <fieldset class="full">
-            <legend>PayPal Supported Currencies</legend>
-            <div class="admin-checkbox-cluster">
-              ${["USD", "HKD"].map((currency) => `
-                <label class="admin-checkbox-field">
-                  <input
-                    type="checkbox"
-                    name="paypalCurrencies"
-                    value="${currency}"
-                    ${paypalCurrencies.includes(currency) ? "checked" : ""}
-                  >
-                  <span>${currency}</span>
+            `
+            : field.type === "textarea"
+              ? `
+                <label class="${field.full ? "full" : ""}">
+                  ${escapeHtml(field.label)}
+                  <textarea name="${escapeHtml(field.name)}" rows="3">${escapeHtml(currency.details[field.prop] || "")}</textarea>
                 </label>
-              `).join("")}
-            </div>
-            <p class="admin-field-hint">Only currencies selected here can show PayPal on checkout and payment pages.</p>
-          </fieldset>
-        </div>
-      </section>
+              `
+              : `
+                <label class="${field.full ? "full" : ""}">
+                  ${escapeHtml(field.label)}
+                  <input
+                    type="text"
+                    name="${escapeHtml(field.name)}"
+                    value="${escapeHtml(currency.details[field.prop] || "")}"
+                  >
+                </label>
+              `
+        }
+      `).join("");
+    };
 
-      <section class="admin-panel admin-settings-panel">
-        <div class="admin-panel-header">
-          <div>
-            <h3>SWIFT Bank Transfer Accounts</h3>
-            <p>Configure the receiving account shown to customers when SWIFT International Wire Transfer is selected.</p>
-          </div>
-        </div>
-        <div class="admin-settings-summary-row">
-          <div class="admin-settings-summary-card">
-            <span>Bank Transfer</span>
-            <strong>${bankTransferEnabled ? "Enabled" : "Disabled"}</strong>
-          </div>
-          <div class="admin-settings-summary-card">
-            <span>Configured currencies</span>
-            <strong>${escapeHtml(bankTransferSummary)}</strong>
-          </div>
-        </div>
-        ${bankTransferEnabled && !configuredCurrencies.length ? `
-          <div class="admin-settings-warning">
-            <strong>Configuration needed</strong>
-            <p>Bank Transfer is enabled, but no complete SWIFT receiving account is available yet. Customers will be blocked from incomplete bank instructions until one currency is fully configured.</p>
-          </div>
-        ` : ""}
-        <div class="admin-settings-tab-row" role="tablist" aria-label="Bank transfer currencies">
-          ${bankTransferCurrencies.map((currency) => `
-            <button
-              type="button"
-              class="admin-settings-tab ${currency.key === activeCurrencyConfig.key ? "is-active" : ""}"
-              data-bank-currency="${currency.key}"
-              aria-selected="${currency.key === activeCurrencyConfig.key ? "true" : "false"}"
-            >
-              <span>${currency.label}</span>
-              <small>${currency.configured ? "Configured" : "Incomplete"}</small>
-            </button>
-          `).join("")}
-        </div>
-        <div class="admin-payment-account-shell">
-          <div class="admin-payment-account-header">
-            <div>
-              <h4>${escapeHtml(activeCurrencyConfig.label)} SWIFT Receiving Account</h4>
-              <p>Configure the real receiving account used for ${escapeHtml(activeCurrencyConfig.label)} SWIFT transfers.</p>
-            </div>
-          </div>
-          <div class="admin-form-grid">
-            ${activeCurrencyFields.map((field) => `
-              ${
-                field.type === "checkbox"
-                  ? `
-                    <label class="admin-checkbox-field full">
-                      <input
-                        type="checkbox"
-                        name="${escapeHtml(field.name)}"
-                        ${activeCurrencyConfig.details[field.prop] ? "checked" : ""}
-                      >
-                      <span>${escapeHtml(field.label)}</span>
-                    </label>
-                  `
-                  : field.type === "textarea"
-                    ? `
-                      <label class="${field.full ? "full" : ""}">
-                        ${escapeHtml(field.label)}
-                        <textarea name="${escapeHtml(field.name)}" rows="3">${escapeHtml(activeCurrencyConfig.details[field.prop] || "")}</textarea>
-                      </label>
-                    `
-                    : `
-                      <label class="${field.full ? "full" : ""}">
-                        ${escapeHtml(field.label)}
+    return `
+      ${renderHeader()}
+      <form class="admin-settings-shell admin-payment-settings-page" id="settings-form">
+        <section class="admin-payment-settings-group" aria-labelledby="active-payment-providers-title">
+          <details class="admin-payment-accordion admin-payment-section-accordion">
+            <summary>
+              <span class="admin-payment-accordion-icon" aria-hidden="true">AP</span>
+              <span class="admin-payment-accordion-copy">
+                <strong id="active-payment-providers-title">Active Payment Providers</strong>
+                <small>PayPal and Bank Transfer checkout methods</small>
+              </span>
+              <span class="admin-method-status-badge is-success">${formatNumber([paypalState.enabled, bankTransferState.enabled].filter(Boolean).length)} enabled</span>
+              <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="admin-payment-accordion-body admin-payment-section-accordion-body">
+              <div class="admin-payment-accordion-list">
+            <details class="admin-payment-accordion">
+              <summary>
+                <span class="admin-payment-accordion-icon" aria-hidden="true">PP</span>
+                <span class="admin-payment-accordion-copy">
+                  <strong>PayPal</strong>
+                  <small>Online payment through PayPal Checkout</small>
+                </span>
+                <span class="admin-method-status-badge ${paypalState.enabled ? "is-success" : ""}">${paypalState.enabled ? "Connected" : "Disabled"}</span>
+                ${renderProviderToggle(paypalMethod, paypalState)}
+                <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
+              </summary>
+              <div class="admin-payment-accordion-body">
+                <div class="admin-payment-config-heading">
+                  <h4>PayPal Configuration</h4>
+                  <p>Control checkout currencies without changing the PayPal payment flow.</p>
+                </div>
+                <div class="admin-payment-config-grid">
+                  <div class="admin-payment-config-item">
+                    <span>Connection Status</span>
+                    <strong>${escapeHtml(paypalState.status)}</strong>
+                  </div>
+                  <div class="admin-payment-config-item">
+                    <span>Settlement Channel</span>
+                    <strong>${escapeHtml(settlementProvider)}</strong>
+                  </div>
+                </div>
+                <fieldset class="admin-paypal-currency-settings">
+                  <legend>Supported currencies</legend>
+                  <div class="admin-checkbox-cluster">
+                    ${["USD", "HKD"].map((currency) => `
+                      <label class="admin-checkbox-field">
                         <input
-                          type="text"
-                          name="${escapeHtml(field.name)}"
-                          value="${escapeHtml(activeCurrencyConfig.details[field.prop] || "")}"
+                          type="checkbox"
+                          name="paypalCurrencies"
+                          value="${currency}"
+                          ${paypalCurrencies.includes(currency) ? "checked" : ""}
                         >
+                        <span>${currency}</span>
                       </label>
-                    `
-              }
-            `).join("")}
-          </div>
-        </div>
-      </section>
+                    `).join("")}
+                  </div>
+                  <p class="admin-field-hint">Only selected currencies can offer PayPal on checkout and payment pages.</p>
+                </fieldset>
+              </div>
+            </details>
 
-      <div class="admin-actions-inline">
-        <button class="admin-primary-button" type="submit">${escapeHtml(meta.submitLabel)}</button>
-      </div>
-      <p class="admin-form-status" id="settings-form-status"></p>
-    </form>
-  `;
+            <details class="admin-payment-accordion">
+              <summary>
+                <span class="admin-payment-accordion-icon" aria-hidden="true">BT</span>
+                <span class="admin-payment-accordion-copy">
+                  <strong>Bank Transfer</strong>
+                  <small>Receive SWIFT international wire payments</small>
+                </span>
+                <span class="admin-method-status-badge ${bankTransferState.status === "Configured" ? "is-success" : bankTransferState.status === "Incomplete" ? "is-warning" : ""}">${bankTransferEnabled ? bankTransferState.status : "Disabled"}</span>
+                ${renderProviderToggle(bankTransferMethod, bankTransferState)}
+                <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
+              </summary>
+              <div class="admin-payment-accordion-body">
+                <div class="admin-payment-config-heading">
+                  <h4>Bank Transfer Configuration</h4>
+                  <p>Review provider availability here. Receiving account details are managed separately below.</p>
+                </div>
+                <div class="admin-payment-config-grid">
+                  <div class="admin-payment-config-item">
+                    <span>Settlement Provider</span>
+                    <strong>${escapeHtml(settlementProvider)}</strong>
+                  </div>
+                  <div class="admin-payment-config-item">
+                    <span>Available currencies</span>
+                    <div class="admin-payment-currency-badges">
+                      ${bankTransferCurrencies.map((currency) => `<span class="${currency.configured ? "is-configured" : ""}">${escapeHtml(currency.label)}</span>`).join("")}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </details>
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <section class="admin-payment-settings-group" aria-labelledby="settlement-accounts-title">
+          <details class="admin-payment-accordion admin-payment-section-accordion">
+            <summary>
+              <span class="admin-payment-accordion-icon" aria-hidden="true">SA</span>
+              <span class="admin-payment-accordion-copy">
+                <strong id="settlement-accounts-title">Settlement Accounts</strong>
+                <small>Receiving accounts managed independently from payment methods</small>
+              </span>
+              <span class="admin-method-status-badge ${configuredCurrencies.length ? "is-success" : "is-warning"}">${escapeHtml(bankTransferSummary)}</span>
+              <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="admin-payment-accordion-body admin-payment-section-accordion-body">
+              <details class="admin-payment-accordion admin-settlement-accordion">
+                <summary>
+                  <span class="admin-payment-accordion-icon" aria-hidden="true">WF</span>
+                  <span class="admin-payment-accordion-copy">
+                    <strong>${escapeHtml(settlementProvider)}</strong>
+                    <small>USD and HKD SWIFT receiving accounts</small>
+                  </span>
+                  <span class="admin-method-status-badge ${configuredCurrencies.length ? "is-success" : "is-warning"}">${escapeHtml(bankTransferSummary)}</span>
+                  <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
+                </summary>
+                <div class="admin-payment-accordion-body">
+                  ${bankTransferEnabled && !configuredCurrencies.length ? `
+                    <div class="admin-settings-warning">
+                      <strong>Configuration needed</strong>
+                      <p>Bank Transfer is enabled, but no complete SWIFT receiving account is available yet.</p>
+                    </div>
+                  ` : ""}
+                  <div class="admin-settlement-account-grid">
+                    ${bankTransferCurrencies.map((currency) => `
+                      <section class="admin-settlement-account-card">
+                        <div class="admin-payment-account-header">
+                          <div>
+                            <h4>${escapeHtml(currency.label)} Account</h4>
+                            <p>${currency.configured ? "Ready for customer payment instructions." : "Complete all required account details."}</p>
+                          </div>
+                          <span class="admin-method-status-badge ${currency.configured ? "is-success" : "is-warning"}">${currency.configured ? "Configured" : "Incomplete"}</span>
+                        </div>
+                        <div class="admin-form-grid">
+                          ${renderAccountFields(currency)}
+                        </div>
+                      </section>
+                    `).join("")}
+                  </div>
+                </div>
+              </details>
+            </div>
+          </details>
+        </section>
+
+        <section class="admin-payment-settings-group" aria-labelledby="future-payment-methods-title">
+          <details class="admin-payment-accordion admin-future-payment-accordion">
+            <summary>
+              <span class="admin-payment-accordion-icon" aria-hidden="true">FP</span>
+              <span class="admin-payment-accordion-copy">
+                <strong id="future-payment-methods-title">Future Payment Methods</strong>
+                <small>Providers that are not connected to checkout</small>
+              </span>
+              <span class="admin-method-status-badge">Coming Soon</span>
+              <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
+            </summary>
+            <div class="admin-payment-accordion-body">
+              <div class="admin-future-payment-list">
+                ${futureMethods.map((method) => `
+                  <article class="admin-future-payment-card">
+                    <span class="admin-payment-accordion-icon" aria-hidden="true">${method.id === "credit-card" ? "CC" : "CR"}</span>
+                    <div>
+                      <strong>${escapeHtml(method.label)}</strong>
+                      <p>${escapeHtml(method.description)}</p>
+                    </div>
+                    <span class="admin-method-status-badge">Coming Soon</span>
+                  </article>
+                `).join("")}
+              </div>
+            </div>
+          </details>
+        </section>
+
+        <div class="admin-actions-inline admin-payment-settings-actions">
+          <button class="admin-primary-button" type="submit">${escapeHtml(meta.submitLabel)}</button>
+        </div>
+        <p class="admin-form-status" id="settings-form-status"></p>
+      </form>
+    `;
+  };
 
   if (activeSettingsSection === "general-settings") {
     contentRoot.innerHTML = renderGeneralSettings();
@@ -7514,16 +7816,9 @@ const renderSettingsSectionV4 = async () => {
     contentRoot.innerHTML = renderPaymentSettings();
   }
 
-  contentRoot.querySelectorAll("[data-bank-currency]")?.forEach((tabButton) => {
-    tabButton.addEventListener("click", () => {
-      const currentForm = document.querySelector("#settings-form");
-      if (currentForm && activeSettingsSection === "payment-settings") {
-        const formData = new FormData(currentForm);
-        adminState.settings.paymentDraft = buildPaymentSettingsDraft(formData, bankTransferSettings);
-      }
-      adminState.settings.bankTransferCurrency = normalizeCurrencyCode(tabButton.dataset.bankCurrency);
-      renderSettingsSectionV4().catch((error) => console.error("[admin] settings rerender failed", error));
-    });
+  contentRoot.querySelectorAll("[data-payment-provider-toggle]").forEach((toggle) => {
+    toggle.addEventListener("click", (event) => event.stopPropagation());
+    toggle.addEventListener("keydown", (event) => event.stopPropagation());
   });
 
   const form = document.querySelector("#settings-form");
@@ -7563,7 +7858,6 @@ const renderSettingsSectionV4 = async () => {
             : buildPaymentSettingsDraft(formData, bankTransferSettings);
 
       const updatedSettings = await window.NorthstarStore.updateSettings(partial);
-      adminState.settings.paymentDraft = null;
       if (updatedSettings?.reauthRequired) {
         showLogin();
         return;
