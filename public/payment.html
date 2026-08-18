@@ -26,44 +26,53 @@
 
   <main>
     <section class="section section-light checkout-section">
-      <div class="container checkout-layout">
-        <section class="checkout-summary reveal">
-          <div class="checkout-panel-head">
-            <div>
-              <p class="eyebrow">Order Summary</p>
-              <h2>Review your order</h2>
-            </div>
-            <a class="btn btn-outline checkout-back-link" id="payment-back-link" href="/checkout">Back to Checkout</a>
+      <div class="container payment-desktop-flow">
+        <header class="payment-page-heading reveal">
+          <div>
+            <p class="eyebrow">Secure Checkout</p>
+            <h1>Payment</h1>
+            <p>Complete your payment to confirm your order.</p>
           </div>
+          <a class="btn btn-outline checkout-back-link" id="payment-back-link" href="/checkout">Back to Order Details</a>
+        </header>
 
-          <div class="checkout-product-card" id="payment-product"></div>
-          <div class="checkout-totals" id="payment-totals"></div>
+        <div class="payment-success-banner reveal" role="status">
+          <span class="payment-success-icon" aria-hidden="true">&#10003;</span>
+          <div><strong>Order Created Successfully!</strong><p>Your order is secure. Complete the payment below to move it forward.</p></div>
+        </div>
+
+        <section class="payment-overview-card reveal">
+          <div class="payment-section-heading">
+            <div><p class="eyebrow">Payment Overview</p><h2>Order payment details</h2></div>
+          </div>
+          <div class="payment-overview-grid" id="payment-overview"></div>
         </section>
 
-        <section class="checkout-form-panel reveal">
-          <div class="checkout-panel-head">
-            <div>
-              <p class="eyebrow">Payment Method</p>
-              <h2>Choose how you want to pay</h2>
-            </div>
-          </div>
-
-          <form class="checkout-form" id="payment-form">
-            <div class="payment-methods">
-              <p class="checkout-field-label">Available Methods</p>
-              <div class="payment-method-grid" id="payment-method-grid"></div>
-            </div>
-
+        <div class="payment-workspace">
+          <form class="checkout-form payment-primary-card reveal" id="payment-form">
+            <input type="hidden" name="paymentMethod" id="payment-method-value">
             <div id="payment-details-container"></div>
-
-            <div class="checkout-note-box">
-              <strong>Important</strong>
-              <p>Review your selected payment method before continuing.</p>
+            <div class="payment-action-row">
+              <a class="btn btn-outline" id="payment-secondary-back-link" href="/checkout">Back to Order Details</a>
+              <button class="btn btn-primary" type="submit">Continue Payment</button>
             </div>
-
-            <button class="btn btn-primary btn-full" type="submit">Confirm Payment Method</button>
             <p class="form-status checkout-status" id="payment-status" aria-live="polite"></p>
           </form>
+
+          <aside class="payment-order-context reveal">
+            <div class="payment-section-heading">
+              <div><p class="eyebrow">Order Summary</p><h2>What you are paying for</h2></div>
+            </div>
+            <div class="checkout-product-card" id="payment-product"></div>
+            <div class="checkout-totals" id="payment-totals"></div>
+          </aside>
+        </div>
+
+        <section class="checkout-trust-bar reveal" aria-label="Payment assurances">
+          <div><span class="checkout-trust-icon" aria-hidden="true">&#10003;</span><strong>Secure Payment</strong></div>
+          <div><span class="checkout-trust-icon" aria-hidden="true">&#10003;</span><strong>Worldwide Shipping</strong></div>
+          <div><span class="checkout-trust-icon" aria-hidden="true">&#10003;</span><strong>24/7 Support</strong></div>
+          <div><span class="checkout-trust-icon" aria-hidden="true">&#10003;</span><strong>Buyer Protection</strong></div>
         </section>
       </div>
     </section>

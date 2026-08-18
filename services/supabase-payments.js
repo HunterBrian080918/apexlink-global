@@ -125,6 +125,8 @@ const PAYMENT_STATUSES = new Set([
   "pending",
   "awaiting_payment",
   "payment_submitted",
+  "pending_crypto_verification",
+  "pending_crypto_detection",
   "paid",
   "failed",
   "refunded",
@@ -185,6 +187,15 @@ const mapPaymentRow = (row) => ({
   paypalOrderId: String(row?.paypal_order_id || "").trim(),
   paypalCaptureId: String(row?.paypal_capture_id || "").trim(),
   paymentProofUrl: String(row?.payment_proof_url || "").trim(),
+  cryptoAsset: String(row?.crypto_asset || "").trim().toUpperCase(),
+  cryptoNetwork: String(row?.crypto_network || "").trim().toUpperCase(),
+  cryptoWalletAddress: String(row?.crypto_wallet_address || "").trim(),
+  cryptoExpectedAmount: Number(row?.crypto_expected_amount || 0),
+  cryptoReceivedAmount: Number(row?.crypto_received_amount || 0),
+  cryptoTxHash: String(row?.crypto_tx_hash || "").trim(),
+  cryptoConfirmations: Number(row?.crypto_confirmations || 0),
+  cryptoDetectedAt: String(row?.crypto_detected_at || "").trim(),
+  cryptoStatus: String(row?.crypto_status || "").trim().toLowerCase(),
   note: String(row?.note || "").trim(),
   status: String(row?.status || "pending")
     .trim()
@@ -208,6 +219,39 @@ const getPaymentById = async (id) => {
 
   const rows = await requestSupabase(`payments?select=*&id=eq.${escapeFilterValue(paymentId)}&limit=1`);
   return Array.isArray(rows) && rows[0] ? mapPaymentRow(rows[0]) : null;
+};
+
+const getPaymentByCryptoTxHash = async (txHash) => {
+  const normalized = String(txHash || "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  const rows = await requestSupabase(
+    `payments?select=*&crypto_tx_hash=eq.${escapeFilterValue(normalized)}&limit=1`
+  );
+  return Array.isArray(rows) && rows[0] ? mapPaymentRow(rows[0]) : null;
+};
+
+const listPendingCryptoPayments = async () => {
+  const rows = await requestSupabase(
+    "payments?select=*&payment_provider=in.(crypto_trc20,crypto_manual)&crypto_status=in.(waiting,detected,confirming)&order=created_at.asc"
+  );
+  const pendingStatuses = new Set([
+    "unpaid",
+    "pending",
+    "awaiting_payment",
+    "pending_crypto_detection",
+    "pending_crypto_verification",
+  ]);
+
+  return (Array.isArray(rows) ? rows.map(mapPaymentRow) : []).filter(
+    (payment) =>
+      String(payment.cryptoAsset || "").toUpperCase() === "USDT" &&
+      String(payment.cryptoNetwork || "").toUpperCase() === "TRC20" &&
+      Boolean(payment.cryptoWalletAddress) &&
+      pendingStatuses.has(normalizePaymentStatus(payment.status || "pending"))
+  );
 };
 
 const getPaymentByOrderAndType = async (orderId, paymentType) => {
@@ -366,7 +410,19 @@ const deriveOrderPaymentStatus = (order, payments) => {
   if (hasPartialRefund) {
     return "partially_refunded";
   }
-  if (items.some((payment) => ["pending", "awaiting_payment", "payment_submitted"].includes(normalizePaymentStatus(payment.status)))) {
+  if (
+    items.some((payment) =>
+      [
+        "pending",
+        "awaiting_payment",
+        "payment_submitted",
+        "pending_crypto_verification",
+        "pending_crypto_detection",
+      ].includes(
+        normalizePaymentStatus(payment.status)
+      )
+    )
+  ) {
     return "pending";
   }
   if (items.every((payment) => normalizePaymentStatus(payment.status) === "failed")) {
@@ -437,6 +493,10 @@ const createPaymentForOrder = async (orderId, input) => {
   const depositAmount = paymentType === "deposit" ? amount : parseAmount(input?.depositAmount, 0);
   const balanceAmount = paymentType === "balance" ? amount : parseAmount(input?.balanceAmount, 0);
   const paymentMethod = String(input?.paymentMethod || "").trim();
+  const isCryptoProvider = ["crypto_manual", "crypto_trc20"].includes(
+    String(input?.paymentProvider || "").trim().toLowerCase()
+  );
+  const cryptoExpectedAmount = isCryptoProvider ? amount : parseAmount(input?.cryptoExpectedAmount, 0);
 
   if (!paymentMethod) {
     throw new Error("Payment method is required.");
@@ -473,6 +533,31 @@ const createPaymentForOrder = async (orderId, input) => {
     ...(toNullableText(input?.paymentProofUrl)
       ? { payment_proof_url: toNullableText(input?.paymentProofUrl) }
       : {}),
+    ...(toNullableText(input?.cryptoAsset) ? { crypto_asset: toNullableText(input.cryptoAsset)?.toUpperCase() } : {}),
+    ...(toNullableText(input?.cryptoNetwork)
+      ? { crypto_network: toNullableText(input.cryptoNetwork)?.toUpperCase() }
+      : {}),
+    ...(toNullableText(input?.cryptoWalletAddress)
+      ? { crypto_wallet_address: toNullableText(input.cryptoWalletAddress) }
+      : {}),
+    ...(cryptoExpectedAmount > 0 ? { crypto_expected_amount: cryptoExpectedAmount } : {}),
+    ...(input?.cryptoReceivedAmount !== undefined && parseAmount(input.cryptoReceivedAmount, -1) >= 0
+      ? { crypto_received_amount: parseAmount(input.cryptoReceivedAmount, 0) }
+      : isCryptoProvider
+        ? { crypto_received_amount: 0 }
+      : {}),
+    ...(toNullableText(input?.cryptoTxHash) ? { crypto_tx_hash: toNullableText(input.cryptoTxHash)?.toLowerCase() } : {}),
+    ...(input?.cryptoConfirmations !== undefined && Number.isInteger(Number(input.cryptoConfirmations)) && Number(input.cryptoConfirmations) >= 0
+      ? { crypto_confirmations: Number(input.cryptoConfirmations) }
+      : isCryptoProvider
+        ? { crypto_confirmations: 0 }
+      : {}),
+    ...(toNullableText(input?.cryptoDetectedAt) ? { crypto_detected_at: toNullableText(input.cryptoDetectedAt) } : {}),
+    ...(toNullableText(input?.cryptoStatus)
+      ? { crypto_status: toNullableText(input.cryptoStatus)?.toLowerCase() }
+      : isCryptoProvider
+        ? { crypto_status: "waiting" }
+        : {}),
     ...(toNullableText(input?.note) ? { note: toNullableText(input?.note) } : {}),
   };
 
@@ -599,6 +684,47 @@ const reviewBankTransferPayment = async (paymentId, nextStatus, options = {}) =>
   };
 };
 
+const reviewCryptoPayment = async (paymentId, nextStatus, options = {}) => {
+  const normalizedPaymentId = String(paymentId || "").trim();
+  const normalizedStatus = String(nextStatus || "").trim().toLowerCase();
+  if (!normalizedPaymentId) {
+    throw new Error("Payment id is required.");
+  }
+  if (!new Set(["paid", "failed"]).has(normalizedStatus)) {
+    throw new Error("Crypto payment review status must be paid or failed.");
+  }
+
+  let result;
+  try {
+    result = await requestSupabase("rpc/review_crypto_payment", {
+      method: "POST",
+      body: {
+        p_payment_id: normalizedPaymentId,
+        p_next_status: normalizedStatus,
+        p_created_by: String(options.createdBy || "admin").trim() || "admin",
+      },
+    });
+  } catch (error) {
+    if (/review_crypto_payment|schema cache|function/i.test(String(error?.message || ""))) {
+      error.status = 503;
+      error.message = "Atomic crypto payment confirmation is unavailable. Apply the USDT payment MVP migration.";
+    }
+    throw error;
+  }
+
+  const payment = await getPaymentById(normalizedPaymentId);
+  const order = payment?.orderId ? await getOrderById(payment.orderId) : null;
+  if (!payment?.id || !order?.id) {
+    throw new Error("Atomic crypto payment confirmation did not return persisted records.");
+  }
+
+  return {
+    payment,
+    order,
+    idempotent: Boolean(result?.idempotent),
+  };
+};
+
 const updatePayment = async (paymentId, partial, options = {}) => {
   const normalizedPaymentId = String(paymentId || "").trim();
   if (!normalizedPaymentId) {
@@ -649,6 +775,49 @@ const updatePayment = async (paymentId, partial, options = {}) => {
     patch.payment_proof_url = String(partial.paymentProofUrl || "").trim() || null;
   }
 
+  if (partial?.cryptoAsset !== undefined) {
+    patch.crypto_asset = String(partial.cryptoAsset || "").trim().toUpperCase() || null;
+  }
+
+  if (partial?.cryptoNetwork !== undefined) {
+    patch.crypto_network = String(partial.cryptoNetwork || "").trim().toUpperCase() || null;
+  }
+
+  if (partial?.cryptoWalletAddress !== undefined) {
+    patch.crypto_wallet_address = String(partial.cryptoWalletAddress || "").trim() || null;
+  }
+
+  if (partial?.cryptoExpectedAmount !== undefined) {
+    const cryptoExpectedAmount = parseAmount(partial.cryptoExpectedAmount, 0);
+    patch.crypto_expected_amount = cryptoExpectedAmount > 0 ? cryptoExpectedAmount : null;
+  }
+
+  if (partial?.cryptoReceivedAmount !== undefined) {
+    const cryptoReceivedAmount = parseAmount(partial.cryptoReceivedAmount, -1);
+    patch.crypto_received_amount = cryptoReceivedAmount >= 0 ? cryptoReceivedAmount : null;
+  }
+
+  if (partial?.cryptoTxHash !== undefined) {
+    patch.crypto_tx_hash = String(partial.cryptoTxHash || "").trim().toLowerCase() || null;
+  }
+
+  if (partial?.cryptoConfirmations !== undefined) {
+    const confirmations = Number(partial.cryptoConfirmations);
+    patch.crypto_confirmations = Number.isInteger(confirmations) && confirmations >= 0 ? confirmations : null;
+  }
+
+  if (partial?.cryptoDetectedAt !== undefined) {
+    patch.crypto_detected_at = String(partial.cryptoDetectedAt || "").trim() || null;
+  }
+
+  if (partial?.cryptoStatus !== undefined) {
+    const cryptoStatus = String(partial.cryptoStatus || "").trim().toLowerCase();
+    if (cryptoStatus && !new Set(["waiting", "detected", "confirming", "confirmed", "failed"]).has(cryptoStatus)) {
+      throw new Error("Invalid crypto status.");
+    }
+    patch.crypto_status = cryptoStatus || null;
+  }
+
   if (partial?.note !== undefined) {
     patch.note = String(partial.note || "").trim() || null;
   }
@@ -674,6 +843,11 @@ const updatePayment = async (paymentId, partial, options = {}) => {
   } catch (error) {
     const message = String(error?.message || "");
     if (/check constraint/i.test(message) && /status/i.test(message) && patch.status) {
+      if (["pending_crypto_verification", "pending_crypto_detection"].includes(patch.status)) {
+        error.status = 503;
+        error.message = "USDT payment verification is unavailable until the USDT payment MVP migration is applied.";
+        throw error;
+      }
       patch.status =
         patch.status === "paid" || patch.status === "failed" || patch.status === "refunded" ? patch.status : "pending";
       updatedRows = await withMissingColumnRetries(
@@ -731,12 +905,15 @@ const updatePayment = async (paymentId, partial, options = {}) => {
 module.exports = {
   listPayments,
   getPaymentById,
+  getPaymentByCryptoTxHash,
+  listPendingCryptoPayments,
   listPaymentsByOrder,
   getPaymentByPayPalOrderId,
   getPaymentByPayPalCaptureId,
   getPaymentByOrderAndType,
   createPaymentForOrder,
   reviewBankTransferPayment,
+  reviewCryptoPayment,
   updatePayment,
   resolveNextPaymentStage,
   deriveOrderPaymentStatus,

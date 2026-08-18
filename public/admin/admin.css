@@ -295,7 +295,8 @@ textarea {
   padding: 22px 14px 18px;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   z-index: 30;
 }
 
@@ -3589,7 +3590,8 @@ textarea {
     padding: 18px 10px;
     border-right: 1px solid var(--line);
     border-bottom: 0;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .admin-nav {

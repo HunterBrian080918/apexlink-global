@@ -872,7 +872,7 @@ const createOrder = async (input) => {
     shipping_cycle: shippingCycle || null,
     message: String(payload.message || "").trim() || null,
     admin_note: "",
-    payment_method: "",
+    payment_method: String(payload.paymentMethod || "").trim() || null,
     created_at: nowIso(),
     updated_at: nowIso(),
   };

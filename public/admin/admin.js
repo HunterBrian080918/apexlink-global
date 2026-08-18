@@ -478,6 +478,12 @@ const reviewAdminBankTransferPayment = async (paymentId, status) =>
     body: JSON.stringify({ status }),
   });
 
+const reviewAdminCryptoPayment = async (paymentId, status) =>
+  requestJson(`/api/payments/${encodeURIComponent(paymentId)}/review-crypto`, {
+    method: "POST",
+    body: JSON.stringify({ status }),
+  });
+
 const fetchAdminSupportConversations = async (filters = {}) => {
   const params = new URLSearchParams();
   if (filters.query) {
@@ -1005,6 +1011,8 @@ const PAYMENT_STATUSES = [
   "pending",
   "awaiting_payment",
   "payment_submitted",
+  "pending_crypto_verification",
+  "pending_crypto_detection",
   "deposit_paid",
   "partially_paid",
   "paid",
@@ -1033,12 +1041,17 @@ const ADMIN_PAYMENT_METHOD_OPTIONS = [
   {
     id: "cryptocurrency",
     label: "Cryptocurrency",
-    description: "Connect a crypto payment provider to enable USDT / USDC settlement",
+    description: "Accept manually verified USDT payments on TRC20",
   },
 ];
 const isBankTransferPaymentRecord = (payment) =>
   String(payment?.paymentProvider || "").trim().toLowerCase() === "bank_transfer" ||
   String(payment?.paymentMethod || "").trim().toLowerCase() === "bank transfer";
+const isCryptoPaymentRecord = (payment) =>
+  ["crypto_manual", "crypto_trc20"].includes(String(payment?.paymentProvider || "").trim().toLowerCase()) ||
+  ["cryptocurrency", "usdt cryptocurrency", "usdt"].includes(
+    String(payment?.paymentMethod || "").trim().toLowerCase()
+  );
 const PAYMENT_FILTER_OPTIONS = [
   { value: "all", label: "All" },
   { value: "pending", label: "Pending" },
@@ -1063,9 +1076,10 @@ const normalizePaymentMethodName = (value) =>
     .trim()
     .toLowerCase()
     .replace(/[_-]+/g, " ");
+const isValidTrc20Address = (value) => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(String(value || "").trim());
 
 const SUPPORTED_ADMIN_PAYMENT_METHODS = new Set(
-  ["PayPal", "Bank Transfer"].map((method) => normalizePaymentMethodName(method))
+  ["PayPal", "Bank Transfer", "Cryptocurrency"].map((method) => normalizePaymentMethodName(method))
 );
 
 const getEnabledPaymentMethods = (methods) => {
@@ -1197,6 +1211,16 @@ const getPaymentSettingsMethodState = (method, enabledPaymentKeys, bankTransferS
     };
   }
 
+  if (method.id === "cryptocurrency") {
+    const walletAddress = String(bankTransferSettings?.__cryptoPaymentSettings?.walletAddress || "").trim();
+    return {
+      enabled: isEnabled,
+      status: isValidTrc20Address(walletAddress) ? "Configured" : "Incomplete",
+      note: method.description,
+      disabled: false,
+    };
+  }
+
   return {
     enabled: false,
     status: "Coming soon",
@@ -1205,7 +1229,7 @@ const getPaymentSettingsMethodState = (method, enabledPaymentKeys, bankTransferS
   };
 };
 
-const buildPaymentSettingsDraft = (formData, bankTransferSettings = {}) => {
+const buildPaymentSettingsDraft = (formData, bankTransferSettings = {}, cryptoPaymentSettings = {}) => {
   const selectedPaymentMethods = getEnabledPaymentMethods(formData.getAll("paymentMethods"));
   const selectedPayPalCurrencies = Array.from(
     new Set(
@@ -1248,6 +1272,13 @@ const buildPaymentSettingsDraft = (formData, bankTransferSettings = {}) => {
         intermediarySwiftBic: formData.get("hkdIntermediarySwiftBic") ?? bankTransferSettings?.hkd?.intermediarySwiftBic ?? "",
         instructions: formData.get("hkdInstructions") ?? bankTransferSettings?.hkd?.instructions ?? "",
       },
+    },
+    cryptoPaymentSettings: {
+      asset: "USDT",
+      network: "TRC20",
+      walletAddress: String(
+        formData.get("cryptoWalletAddress") ?? cryptoPaymentSettings.walletAddress ?? ""
+      ).trim(),
     },
   };
 };
@@ -1456,7 +1487,14 @@ const syncAdminRoute = (mode = "replace") => {
 const buildPaymentFilterMatcher = (filter) => {
   const normalizedFilter = String(filter || "all").trim().toLowerCase();
   if (normalizedFilter === "pending") {
-    return new Set(["pending", "unpaid", "awaiting_payment", "payment_submitted"]);
+    return new Set([
+      "pending",
+      "unpaid",
+      "awaiting_payment",
+      "payment_submitted",
+      "pending_crypto_verification",
+      "pending_crypto_detection",
+    ]);
   }
   if (normalizedFilter === "paid") {
     return new Set(["paid", "confirmed", "deposit_paid", "partially_paid"]);
@@ -1586,7 +1624,16 @@ const buildOrderProgressSteps = (order) => {
     currentStepId = "processing";
   } else if (["paid", "deposit_paid", "partially_paid"].includes(normalizedPaymentStatus)) {
     currentStepId = "payment_confirmed";
-  } else if (["pending", "unpaid", "awaiting_payment", "payment_submitted"].includes(normalizedPaymentStatus)) {
+  } else if (
+    [
+      "pending",
+      "unpaid",
+      "awaiting_payment",
+      "payment_submitted",
+      "pending_crypto_verification",
+      "pending_crypto_detection",
+    ].includes(normalizedPaymentStatus)
+  ) {
     currentStepId = "payment_pending";
   }
 
@@ -2054,7 +2101,15 @@ const deriveOrderPaymentStatusFromPayments = (order, payments) => {
     (payment) =>
       payment.paymentType === "full-payment" && String(payment.status || "").trim().toLowerCase().replace(/-/g, "_") === "paid"
   );
-  const hasPending = normalizedStatuses.some((status) => ["pending", "awaiting_payment", "payment_submitted"].includes(status));
+  const hasPending = normalizedStatuses.some((status) =>
+    [
+      "pending",
+      "awaiting_payment",
+      "payment_submitted",
+      "pending_crypto_verification",
+      "pending_crypto_detection",
+    ].includes(status)
+  );
   const isWholesale = (order?.purchaseMode || "") === "wholesale";
 
   if (hasRefunded) {
@@ -4003,9 +4058,17 @@ const renderPaymentDetailMarkup = ({ payment, order, drawerMode = false }) => {
   }
 
   const bankTransfer = isBankTransferPaymentRecord(payment);
+  const cryptoPayment = isCryptoPaymentRecord(payment);
   const paypal = normalizePaymentMethodName(payment.paymentMethod) === "paypal" || normalizeStatusValue(payment.paymentProvider) === "paypal";
   const paymentStatus = normalizeStatusValue(payment.status);
   const bankTransferCanReview = bankTransfer && !["paid", "refunded", "cancelled"].includes(paymentStatus);
+  const cryptoCanReview = cryptoPayment && !["paid", "refunded", "cancelled"].includes(paymentStatus);
+  const cryptoStatusLabel =
+    normalizeStatusValue(payment.paymentProvider) === "crypto_trc20" &&
+    normalizeStatusValue(payment.cryptoStatus) === "confirmed" &&
+    paymentStatus === "paid"
+      ? "Confirmed Automatically"
+      : formatStatusLabel(payment.cryptoStatus || "waiting");
   const transactionMarkup = paypal
     ? `
         <div><dt>PayPal Order ID</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.paypalOrderId || "-")}</dd></div>
@@ -4024,6 +4087,22 @@ const renderPaymentDetailMarkup = ({ payment, order, drawerMode = false }) => {
             payment.paymentProofUrl
               ? `<div class="admin-payment-proof-preview"><a href="${escapeHtml(payment.paymentProofUrl)}" target="_blank" rel="noreferrer"><img src="${escapeHtml(payment.paymentProofUrl)}" alt="Payment proof preview"></a><a href="${escapeHtml(payment.paymentProofUrl)}" target="_blank" rel="noreferrer">Open payment proof</a></div>`
               : escapeHtml(payment.note || "-")
+          }</dd></div>
+        `
+      : cryptoPayment
+        ? `
+          <div><dt>Cryptocurrency</dt><dd>${escapeHtml(payment.cryptoAsset || "USDT")}</dd></div>
+          <div><dt>Network</dt><dd>${escapeHtml(payment.cryptoNetwork || payment.settlementChannel || "TRC20")}</dd></div>
+          <div class="full"><dt>Wallet Address</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.cryptoWalletAddress || "-")}</dd></div>
+          <div><dt>Expected Amount</dt><dd>${escapeHtml(Number(payment.cryptoExpectedAmount || payment.amount || 0).toFixed(6))} USDT</dd></div>
+          <div><dt>Received Amount</dt><dd>${escapeHtml(Number(payment.cryptoReceivedAmount || 0).toFixed(6))} USDT</dd></div>
+          <div><dt>Confirmations</dt><dd>${escapeHtml(payment.cryptoConfirmations ?? 0)}</dd></div>
+          <div><dt>Crypto Status</dt><dd>${escapeHtml(cryptoStatusLabel)}</dd></div>
+          <div class="full"><dt>TX Hash</dt><dd class="admin-break-anywhere admin-mono">${escapeHtml(payment.cryptoTxHash || "-")}</dd></div>
+          <div class="full"><dt>Optional Screenshot</dt><dd>${
+            payment.paymentProofUrl
+              ? `<div class="admin-payment-proof-preview"><a href="${escapeHtml(payment.paymentProofUrl)}" target="_blank" rel="noreferrer"><img src="${escapeHtml(payment.paymentProofUrl)}" alt="USDT payment proof preview"></a><a href="${escapeHtml(payment.paymentProofUrl)}" target="_blank" rel="noreferrer">Open screenshot</a></div>`
+              : "-"
           }</dd></div>
         `
       : `
@@ -4096,7 +4175,13 @@ const renderPaymentDetailMarkup = ({ payment, order, drawerMode = false }) => {
                   ? '<div class="admin-actions-stack"><button class="admin-primary-button" type="button" id="payment-confirm-bank-transfer-button">Confirm Payment</button><button class="admin-secondary-button" type="button" id="payment-reject-bank-transfer-button">Reject Payment</button></div>'
                   : `<span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span>`}
               ` : ""}
-              ${!paypal && !bankTransfer ? `
+              ${cryptoPayment ? `
+                <p class="admin-muted">Verify the TRC20 transaction hash and amount before confirming this payment.</p>
+                ${cryptoCanReview
+                  ? '<div class="admin-actions-stack"><button class="admin-primary-button" type="button" id="payment-confirm-crypto-button">Confirm Payment</button><button class="admin-secondary-button" type="button" id="payment-reject-crypto-button">Reject Payment</button></div>'
+                  : `<span class="admin-pill ${getAdminPillStatusClass(payment.status)}">${escapeHtml(formatPaymentStatusLabel(payment.status))}</span>`}
+              ` : ""}
+              ${!paypal && !bankTransfer && !cryptoPayment ? `
                 <form class="admin-form-stack" id="payment-detail-form">
                   <input type="hidden" name="id" value="${escapeHtml(payment.id)}">
                   <label>Status<select name="status">${getPaymentStatusSelectOptions(payment.status).map((status) => `<option value="${status}" ${paymentStatus === normalizeStatusValue(status) ? "selected" : ""}>${escapeHtml(formatStatusLabel(status))}</option>`).join("")}</select></label>
@@ -4136,6 +4221,14 @@ const bindPaymentDetailInteractions = (payment, order) => {
   });
   document.querySelector("#payment-reject-bank-transfer-button")?.addEventListener("click", async () => {
     await reviewAdminBankTransferPayment(payment.id, "failed");
+    await renderCurrentSection();
+  });
+  document.querySelector("#payment-confirm-crypto-button")?.addEventListener("click", async () => {
+    await reviewAdminCryptoPayment(payment.id, "paid");
+    await renderCurrentSection();
+  });
+  document.querySelector("#payment-reject-crypto-button")?.addEventListener("click", async () => {
+    await reviewAdminCryptoPayment(payment.id, "failed");
     await renderCurrentSection();
   });
   document.querySelector("#payment-detail-form")?.addEventListener("submit", async (event) => {
@@ -4263,6 +4356,7 @@ const renderPaymentsSection = async () => {
         payment.paymentMethod,
         payment.paymentType,
         payment.transactionId,
+        payment.cryptoTxHash,
         payment.paypalCaptureId,
       ]
         .join(" ")
@@ -7688,6 +7782,11 @@ const renderSettingsSectionV4 = async () => {
     ? paymentMethodCurrencies.paypal.map((currency) => String(currency || "").trim().toUpperCase())
     : ["USD"];
   const bankTransferSettings = settings.bankTransferSettings || {};
+  const cryptoPaymentSettings = settings.cryptoPaymentSettings || {
+    asset: "USDT",
+    network: "TRC20",
+    walletAddress: "",
+  };
   const bankTransferCurrencies = getBankTransferCurrencyState(bankTransferSettings);
   const configuredCurrencies = bankTransferCurrencies.filter((currency) => currency.configured);
   const bankTransferEnabled = enabledPaymentKeys.has("bank transfer");
@@ -7767,12 +7866,15 @@ const renderSettingsSectionV4 = async () => {
     const methodsById = new Map(ADMIN_PAYMENT_METHOD_OPTIONS.map((method) => [method.id, method]));
     const paypalMethod = methodsById.get("paypal");
     const bankTransferMethod = methodsById.get("bank-transfer");
+    const cryptoMethod = methodsById.get("cryptocurrency");
     const providerStateInput = {
       ...bankTransferSettings,
       __paypalCurrencies: paypalCurrencies,
+      __cryptoPaymentSettings: cryptoPaymentSettings,
     };
     const paypalState = getPaymentSettingsMethodState(paypalMethod, enabledPaymentKeys, providerStateInput);
     const bankTransferState = getPaymentSettingsMethodState(bankTransferMethod, enabledPaymentKeys, providerStateInput);
+    const cryptoState = getPaymentSettingsMethodState(cryptoMethod, enabledPaymentKeys, providerStateInput);
     const settlementProvider = String(
       bankTransferSettings.settlementChannel || bankTransferSettings.providerName || "WorldFirst"
     ).trim();
@@ -7979,21 +8081,43 @@ const renderSettingsSectionV4 = async () => {
               </div>
             </details>
 
-            <details class="admin-payment-accordion admin-payment-method-card is-future" data-payment-method-card>
+            <details class="admin-payment-accordion admin-payment-method-card" data-payment-method-card>
               <summary>
                 <span class="admin-payment-accordion-icon" aria-hidden="true">CR</span>
                 <span class="admin-payment-accordion-copy">
-                  <strong>Cryptocurrency</strong>
-                  <small>Digital asset payment integration</small>
+                  <strong>USDT Cryptocurrency</strong>
+                  <small>Manual USDT payment verification on TRC20</small>
                 </span>
-                <span class="admin-method-status-badge">Coming Soon</span>
+                <span class="admin-method-status-badge ${cryptoState.status === "Configured" ? "is-success" : cryptoState.status === "Incomplete" ? "is-warning" : ""}">${cryptoState.enabled ? cryptoState.status : "Disabled"}</span>
+                ${renderProviderToggle(cryptoMethod, cryptoState)}
                 <span class="admin-payment-accordion-chevron" aria-hidden="true"></span>
               </summary>
               <div class="admin-payment-accordion-body">
-                <div class="admin-payment-config-grid">
-                  <div class="admin-payment-config-item"><span>Status</span><strong>Coming Soon</strong></div>
-                  <div class="admin-payment-config-item"><span>Provider</span><strong>Not Connected</strong></div>
+                <div class="admin-payment-config-heading">
+                  <h4>USDT Configuration</h4>
+                  <p>Configure the wallet used for manually verified USDT transfers.</p>
                 </div>
+                <div class="admin-payment-config-grid">
+                  <div class="admin-payment-config-item"><span>Status</span><strong>${cryptoState.enabled ? "Active" : "Disabled"}</strong></div>
+                  <div class="admin-payment-config-item"><span>Cryptocurrency</span><strong>USDT</strong></div>
+                  <div class="admin-payment-config-item"><span>Network</span><strong>TRC20</strong></div>
+                  <div class="admin-payment-config-item"><span>Verification</span><strong>Manual review</strong></div>
+                </div>
+                <div class="admin-form-grid admin-crypto-settings-grid">
+                  <label class="full">
+                    USDT receiving address
+                    <input
+                      type="text"
+                      name="cryptoWalletAddress"
+                      value="${escapeHtml(cryptoPaymentSettings.walletAddress || "")}"
+                      placeholder="Enter the TRC20 wallet address"
+                      pattern="T[1-9A-HJ-NP-Za-km-z]{33}"
+                      title="Enter a valid 34-character TRC20 address beginning with T"
+                      autocomplete="off"
+                    >
+                  </label>
+                </div>
+                <p class="admin-field-hint">USDT is shown at checkout only when this method is enabled and a receiving address is configured.</p>
               </div>
             </details>
           </div>
@@ -8070,7 +8194,7 @@ const renderSettingsSectionV4 = async () => {
                 adminPassword: formData.get("adminPassword"),
                 recoveryEmail: formData.get("recoveryEmail"),
               }
-            : buildPaymentSettingsDraft(formData, bankTransferSettings);
+            : buildPaymentSettingsDraft(formData, bankTransferSettings, cryptoPaymentSettings);
 
       const updatedSettings = await window.NorthstarStore.updateSettings(partial);
       if (updatedSettings?.reauthRequired) {

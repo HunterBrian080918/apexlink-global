@@ -36,6 +36,7 @@ const {
   createPaymentForOrder: createSupabasePaymentForOrder,
   updatePayment: updateSupabasePayment,
   reviewBankTransferPayment: reviewSupabaseBankTransferPayment,
+  reviewCryptoPayment: reviewSupabaseCryptoPayment,
   resolveNextPaymentStage: resolveSupabaseNextPaymentStage,
 } = require("./services/supabase-payments");
 const {
@@ -98,6 +99,10 @@ const {
 const {
   getConfigurationStatus: getCryptoPaymentConfigurationStatus,
 } = require("./services/crypto-payments");
+const {
+  startTronPaymentMonitor,
+  stopTronPaymentMonitor,
+} = require("./services/tron-payment-monitor");
 const { createContactInquiry, validateContactPayload } = require("./services/supabase-contact");
 const { recordVisit: recordSupabaseVisit } = require("./services/supabase-analytics");
 const { buildDashboard: buildSupabaseDashboard } = require("./services/supabase-dashboard");
@@ -195,6 +200,7 @@ const toCustomerSafeOrder = (order) => ({
   paymentStatus: order.paymentStatus,
   purchaseMode: order.purchaseMode,
   currency: order.currency,
+  paymentMethod: order.paymentMethod,
   paymentTerms: order.paymentTerms,
   depositPercentage: order.depositPercentage,
   depositAmount: order.depositAmount,
@@ -233,6 +239,16 @@ const toCustomerSafePayment = (payment) => ({
   balanceAmount: payment.balanceAmount,
   status: payment.status,
   paymentProofUrl: payment.paymentProofUrl,
+  transactionId: payment.transactionId,
+  cryptoAsset: payment.cryptoAsset,
+  cryptoNetwork: payment.cryptoNetwork,
+  cryptoWalletAddress: payment.cryptoWalletAddress,
+  cryptoExpectedAmount: payment.cryptoExpectedAmount,
+  cryptoReceivedAmount: payment.cryptoReceivedAmount,
+  cryptoTxHash: payment.cryptoTxHash,
+  cryptoConfirmations: payment.cryptoConfirmations,
+  cryptoDetectedAt: payment.cryptoDetectedAt,
+  cryptoStatus: payment.cryptoStatus,
   createdAt: payment.createdAt,
   updatedAt: payment.updatedAt,
   paidAt: payment.paidAt,
@@ -246,6 +262,30 @@ const normalizePaymentMethodKey = (value) =>
     .toLowerCase()
     .replace(/[_-]+/g, " ");
 const isBankTransferMethod = (value) => normalizePaymentMethodKey(value) === "bank transfer";
+const isPayPalMethod = (value) => normalizePaymentMethodKey(value) === "paypal";
+const isCryptoPaymentMethod = (value) =>
+  ["cryptocurrency", "usdt cryptocurrency", "usdt"].includes(normalizePaymentMethodKey(value));
+const isValidTrc20Address = (value) => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(String(value || "").trim());
+
+const getManualCryptoPaymentSettings = async () => {
+  const siteConfig = await getSupabaseSiteConfig();
+  const settings = siteConfig?.settings || {};
+  const enabledMethods = Array.isArray(settings.paymentMethods) ? settings.paymentMethods : [];
+  const enabled = enabledMethods.some((method) => isCryptoPaymentMethod(method));
+  const cryptoSettings = settings.cryptoPaymentSettings || {};
+  const walletAddress = String(cryptoSettings.walletAddress || "").trim();
+  const asset = "USDT";
+  const network = "TRC20";
+
+  if (!enabled) {
+    throw new Error("USDT Cryptocurrency is not enabled.");
+  }
+  if (!isValidTrc20Address(walletAddress)) {
+    throw new Error("USDT Cryptocurrency is enabled but a valid TRC20 receiving address is not configured.");
+  }
+
+  return { asset, network, walletAddress };
+};
 
 const getPrimaryRetailPayment = (payments) =>
   (Array.isArray(payments) ? payments : []).find((payment) => payment.paymentType === "full-payment") || null;
@@ -358,6 +398,78 @@ const ensureRetailBankTransferPayment = async (order) => {
     payment: paymentPayload.payment,
     order: updatedOrder,
   };
+};
+
+const ensureRetailCryptoPayment = async (order) => {
+  if (String(order?.currency || "USD").trim().toUpperCase() !== "USD") {
+    throw new Error("USDT Cryptocurrency is currently available only for USD orders.");
+  }
+
+  const cryptoSettings = await getManualCryptoPaymentSettings();
+  const existingPayments = await listSupabasePaymentsByOrder(order.id);
+  const primaryPayment = getPrimaryRetailPayment(existingPayments);
+  const cryptoAmount = Number(primaryPayment?.amount || order.totalAmount || order.subtotal || 0);
+
+  if (!(cryptoAmount > 0)) {
+    throw new Error("The USDT payment amount is unavailable.");
+  }
+
+  if (primaryPayment?.id) {
+    const updatedPayment = await updateSupabasePayment(
+      primaryPayment.id,
+      {
+        paymentMethod: "USDT Cryptocurrency",
+        paymentProvider: "crypto_trc20",
+        settlementChannel: cryptoSettings.network,
+        cryptoAsset: cryptoSettings.asset,
+        cryptoNetwork: cryptoSettings.network,
+        cryptoWalletAddress: cryptoSettings.walletAddress,
+        cryptoExpectedAmount: cryptoAmount,
+        cryptoStatus: "waiting",
+        cryptoConfirmations: 0,
+        status: ["pending_crypto_verification", "paid"].includes(
+          String(primaryPayment.status || "").trim().toLowerCase()
+        )
+          ? primaryPayment.status
+          : "pending_crypto_detection",
+      },
+      { createdBy: "system" }
+    );
+    const updatedOrder = await updateSupabaseOrder(
+      order.id,
+      {
+        paymentMethod: "USDT Cryptocurrency",
+        paymentStatus: "pending",
+        orderStatus: "awaiting_payment",
+      },
+      { createdBy: "system" }
+    );
+    return { payment: updatedPayment, order: updatedOrder };
+  }
+
+  const paymentPayload = await createSupabasePaymentForOrder(order.id, {
+    paymentMethod: "USDT Cryptocurrency",
+    paymentProvider: "crypto_trc20",
+    settlementChannel: cryptoSettings.network,
+    paymentType: "full-payment",
+    status: "pending_crypto_detection",
+    cryptoAsset: cryptoSettings.asset,
+    cryptoNetwork: cryptoSettings.network,
+    cryptoWalletAddress: cryptoSettings.walletAddress,
+    cryptoExpectedAmount: cryptoAmount,
+    cryptoStatus: "waiting",
+    cryptoConfirmations: 0,
+  });
+  const updatedOrder = await updateSupabaseOrder(
+    order.id,
+    {
+      paymentMethod: "USDT Cryptocurrency",
+      paymentStatus: "pending",
+      orderStatus: "awaiting_payment",
+    },
+    { createdBy: "system" }
+  );
+  return { payment: paymentPayload.payment, order: updatedOrder };
 };
 
 const finalizePayPalPaymentSuccess = async ({
@@ -1830,9 +1942,16 @@ const handleOrderCreate = async (request, response) => {
     const isWholesale = String(order?.purchaseMode || orderInput?.purchaseMode || "").toLowerCase() === "wholesale";
     if (!isWholesale && order?.id) {
       try {
-        const paymentPayload = isBankTransferMethod(requestedPaymentMethod)
-          ? await ensureRetailBankTransferPayment(order)
-          : await ensureRetailPayPalPayment(order);
+        let paymentPayload;
+        if (isBankTransferMethod(requestedPaymentMethod)) {
+          paymentPayload = await ensureRetailBankTransferPayment(order);
+        } else if (isCryptoPaymentMethod(requestedPaymentMethod)) {
+          paymentPayload = await ensureRetailCryptoPayment(order);
+        } else if (isPayPalMethod(requestedPaymentMethod)) {
+          paymentPayload = await ensureRetailPayPalPayment(order);
+        } else {
+          throw new Error("The selected retail payment method is not supported.");
+        }
         createdPayment = paymentPayload.payment || null;
         order = paymentPayload.order || order;
       } catch (paymentError) {
@@ -1992,6 +2111,109 @@ const handleBankTransferProofUpload = async (request, response, orderId, options
   return true;
 };
 
+const handleCryptoPaymentProofUpload = async (request, response, orderId, options = {}) => {
+  if (!options.customerAccess) {
+    const auth = await requireAuthenticatedAdmin(request, response);
+    if (!auth) {
+      return true;
+    }
+  }
+
+  try {
+    const normalizedOrderId = String(orderId || "").trim();
+    if (!normalizedOrderId) {
+      throw new Error("Order id is required.");
+    }
+
+    const order = options.customerAccess
+      ? await requireCustomerOrderAccess(request, response, normalizedOrderId)
+      : await getSupabaseOrderById(normalizedOrderId);
+    if (options.customerAccess && !order) {
+      return true;
+    }
+    if (!order?.id) {
+      sendJson(response, 404, { error: "Order not found." });
+      return true;
+    }
+
+    const formData = await readMultipartFormData(request);
+    const paymentId = String(formData.get("paymentId") || "").trim();
+    const txHash = String(formData.get("txHash") || "").trim();
+    const file = formData.get("file");
+
+    if (!paymentId) {
+      throw new Error("Payment id is required.");
+    }
+    if (!/^[a-fA-F0-9]{64}$/.test(txHash)) {
+      throw new Error("A valid 64-character TRC20 transaction hash is required.");
+    }
+
+    const payment = await getSupabasePaymentById(paymentId);
+    if (!payment?.id || String(payment.orderId || "").trim() !== order.id) {
+      throw new Error("Payment record not found for this order.");
+    }
+    if (
+      !isCryptoPaymentMethod(payment.paymentMethod) ||
+      !["crypto_manual", "crypto_trc20"].includes(String(payment.paymentProvider || "").trim().toLowerCase())
+    ) {
+      throw new Error("Transaction proof can only be submitted for USDT TRC20 payments.");
+    }
+    if (["paid", "cancelled", "refunded"].includes(String(payment.status || "").trim().toLowerCase())) {
+      throw new Error("This payment can no longer accept transaction proof.");
+    }
+
+    const asset =
+      file instanceof File && file.size
+        ? await storeUploadedAsset(file, {
+            usageType: "payment_proof",
+            displayName: `${order.orderNumber || order.orderId || order.id} USDT proof`,
+            altText: `${order.orderNumber || order.orderId || order.id} USDT payment proof`,
+          })
+        : null;
+
+    const updatedPayment = await updateSupabasePayment(
+      payment.id,
+      {
+        cryptoTxHash: txHash,
+        paymentProofUrl: asset?.secureUrl || asset?.url || payment.paymentProofUrl || "",
+        status: "pending_crypto_verification",
+      },
+      { createdBy: "customer" }
+    );
+
+    await createSupabaseOrderEvent(order.id, {
+      eventType: "payment_status_changed",
+      title: "USDT payment submitted",
+      description: `Customer submitted a TRC20 transaction hash for ${order.orderNumber || order.orderId || order.id}.`,
+      createdBy: "customer",
+      metadata: {
+        paymentId: updatedPayment.id,
+        paymentMethod: "USDT Cryptocurrency",
+        cryptoAsset: updatedPayment.cryptoAsset || "USDT",
+        cryptoNetwork: updatedPayment.cryptoNetwork || "TRC20",
+        transactionHash: txHash,
+        paymentProofUrl: updatedPayment.paymentProofUrl || "",
+      },
+    });
+
+    sendJson(response, 201, {
+      ok: true,
+      payment: options.customerAccess ? toCustomerSafePayment(updatedPayment) : updatedPayment,
+      asset,
+    });
+  } catch (error) {
+    console.error("[payments] crypto proof upload failed:", error);
+    const duplicateTransaction = /payments_crypto_tx_hash_key|duplicate key/i.test(String(error?.message || ""));
+    sendJson(response, error?.status || 400, {
+      error: duplicateTransaction
+        ? "This transaction hash is already linked to another payment."
+        : error?.message || "Unable to submit USDT transaction proof.",
+    });
+  }
+
+  return true;
+};
+
 const handleOrderUpdate = async (request, response, orderId) => {
   const auth = await requireAuthenticatedAdmin(request, response);
   if (!auth) {
@@ -2112,9 +2334,10 @@ const sendCustomerOrderPayments = async (request, response, orderId) => {
 };
 
 const handleOrderPaymentCreate = async (request, response, orderId, options = {}) => {
+  let customerOrder = null;
   if (options.customerAccess) {
-    const order = await requireCustomerOrderAccess(request, response, orderId);
-    if (!order) {
+    customerOrder = await requireCustomerOrderAccess(request, response, orderId);
+    if (!customerOrder) {
       return true;
     }
   } else {
@@ -2127,17 +2350,41 @@ const handleOrderPaymentCreate = async (request, response, orderId, options = {}
   try {
     const body = await readJsonBody(request);
     const rawPaymentInput = body?.payment && typeof body.payment === "object" ? body.payment : body;
-    const paymentInput = options.customerAccess
-      ? {
+    let paymentInput = rawPaymentInput;
+    if (options.customerAccess) {
+      if (isBankTransferMethod(rawPaymentInput?.paymentMethod)) {
+        paymentInput = {
           ...rawPaymentInput,
           paymentMethod: "Bank Transfer",
           paymentProvider: "bank_transfer",
           settlementChannel: WORLD_FIRST_SETTLEMENT_CHANNEL,
           status: "pending",
+        };
+      } else if (isCryptoPaymentMethod(rawPaymentInput?.paymentMethod)) {
+        if (String(customerOrder?.currency || "USD").trim().toUpperCase() !== "USD") {
+          throw new Error("USDT Cryptocurrency is currently available only for USD orders.");
         }
-      : rawPaymentInput;
-    if (options.customerAccess && !isBankTransferMethod(rawPaymentInput?.paymentMethod)) {
-      throw new Error("Online PayPal payments must use the PayPal checkout endpoint.");
+        const cryptoSettings = await getManualCryptoPaymentSettings();
+        const expectedAmount = Number(rawPaymentInput?.amount || customerOrder?.totalAmount || customerOrder?.subtotal || 0);
+        if (!(expectedAmount > 0)) {
+          throw new Error("The USDT payment amount is unavailable.");
+        }
+        paymentInput = {
+          ...rawPaymentInput,
+          paymentMethod: "USDT Cryptocurrency",
+          paymentProvider: "crypto_trc20",
+          settlementChannel: cryptoSettings.network,
+          cryptoAsset: cryptoSettings.asset,
+          cryptoNetwork: cryptoSettings.network,
+          cryptoWalletAddress: cryptoSettings.walletAddress,
+          cryptoExpectedAmount: expectedAmount,
+          cryptoStatus: "waiting",
+          cryptoConfirmations: 0,
+          status: "pending_crypto_detection",
+        };
+      } else {
+        throw new Error("Online PayPal payments must use the PayPal checkout endpoint.");
+      }
     }
     const payload = await createSupabasePaymentForOrder(orderId, paymentInput);
     if (!payload.idempotent) {
@@ -2318,6 +2565,33 @@ const handleBankTransferPaymentReview = async (request, response, paymentId) => 
     console.error("[payments] bank transfer review failed:", error);
     sendJson(response, error?.status || 400, {
       error: error?.message || "Unable to review bank transfer payment.",
+    });
+  }
+
+  return true;
+};
+
+const handleCryptoPaymentReview = async (request, response, paymentId) => {
+  const auth = await requireAuthenticatedAdmin(request, response);
+  if (!auth) {
+    return true;
+  }
+
+  try {
+    const body = await readJsonBody(request);
+    const result = await reviewSupabaseCryptoPayment(paymentId, body?.status, {
+      createdBy: auth.session.email || "admin",
+    });
+    sendJson(response, 200, {
+      ok: true,
+      idempotent: result.idempotent,
+      payment: result.payment,
+      order: result.order,
+    });
+  } catch (error) {
+    console.error("[payments] crypto review failed:", error);
+    sendJson(response, error?.status || 400, {
+      error: error?.message || "Unable to review USDT payment.",
     });
   }
 
@@ -3422,6 +3696,19 @@ const handleAdminApi = async (request, response, requestUrl) => {
     );
   }
 
+  if (
+    requestUrl.pathname.startsWith("/api/customer/orders/") &&
+    requestUrl.pathname.endsWith("/crypto-payment-proof") &&
+    request.method === "POST"
+  ) {
+    return handleCryptoPaymentProofUpload(
+      request,
+      response,
+      parseNestedCustomerOrderIdFromPath(requestUrl.pathname, "/crypto-payment-proof"),
+      { customerAccess: true }
+    );
+  }
+
   if (requestUrl.pathname.startsWith("/api/customer/orders/") && request.method === "GET") {
     return sendCustomerOrderDetail(
       request,
@@ -3514,6 +3801,17 @@ const handleAdminApi = async (request, response, requestUrl) => {
       requestUrl.pathname.slice("/api/payments/".length, -"/review-bank-transfer".length)
     ).trim();
     return handleBankTransferPaymentReview(request, response, paymentId);
+  }
+
+  if (
+    requestUrl.pathname.startsWith("/api/payments/") &&
+    requestUrl.pathname.endsWith("/review-crypto") &&
+    request.method === "POST"
+  ) {
+    const paymentId = decodeURIComponent(
+      requestUrl.pathname.slice("/api/payments/".length, -"/review-crypto".length)
+    ).trim();
+    return handleCryptoPaymentReview(request, response, paymentId);
   }
 
   if (requestUrl.pathname.startsWith("/api/payments/") && request.method === "PATCH") {
@@ -3910,6 +4208,7 @@ server.on("listening", () => {
   addresses.forEach((address) => {
     console.log(`Network: http://${address}:${port}/`);
   });
+  startTronPaymentMonitor();
 });
 
 server.on("error", (error) => {
@@ -3937,6 +4236,7 @@ const shutdown = (signal) => {
 
   shuttingDown = true;
   console.log(`[shutdown] Received ${signal}. Closing server gracefully...`);
+  stopTronPaymentMonitor();
 
   shutdownTimer = setTimeout(() => {
     console.error("[shutdown] Graceful shutdown timed out after 10 seconds. Forcing exit.");

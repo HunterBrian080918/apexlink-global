@@ -26,84 +26,124 @@
 
   <main>
     <section class="section section-light checkout-section">
-      <div class="container checkout-layout">
-        <section class="checkout-summary reveal">
+      <div class="container checkout-desktop-flow">
+        <header class="checkout-page-heading reveal">
+          <div>
+            <p class="eyebrow">Secure Checkout</p>
+            <h1>Review and place your order</h1>
+            <p>Confirm the order details, buyer information, and preferred payment method.</p>
+          </div>
+          <a class="btn btn-outline checkout-back-link" href="/products">Back to Products</a>
+        </header>
+
+        <section class="checkout-flow-card checkout-summary reveal">
           <div class="checkout-panel-head">
             <div>
-              <p class="eyebrow">Order Summary</p>
-              <h2>Your selected product</h2>
+              <span class="checkout-step-index">01</span>
+              <div>
+                <p class="eyebrow">Order Summary</p>
+                <h2>Product and pricing</h2>
+              </div>
             </div>
-            <a class="btn btn-outline checkout-back-link" href="/products">Back to Products</a>
+            <span class="checkout-step-state">Review</span>
           </div>
 
-          <div class="checkout-product-card" id="checkout-product"></div>
-
-          <div class="checkout-totals" id="checkout-totals"></div>
+          <div class="checkout-order-summary-grid">
+            <div class="checkout-product-card" id="checkout-product"></div>
+            <div class="checkout-order-metrics">
+              <label class="checkout-quantity-control">
+                <span>Quantity</span>
+                <input id="quantity-input" form="checkout-form" type="number" name="quantity" step="1" required>
+                <small id="checkout-quantity-note" aria-live="polite"></small>
+              </label>
+              <div class="checkout-totals" id="checkout-totals"></div>
+            </div>
+          </div>
         </section>
 
-        <section class="checkout-form-panel reveal">
-          <div class="checkout-panel-head">
-            <div>
-              <p class="eyebrow">Buyer Details</p>
-              <h2>Buyer and shipping details</h2>
+        <form class="checkout-form checkout-flow-form" id="checkout-form">
+          <section class="checkout-flow-card checkout-form-panel reveal">
+            <div class="checkout-panel-head">
+              <div>
+                <span class="checkout-step-index">02</span>
+                <div>
+                  <p class="eyebrow">Buyer &amp; Shipping Information</p>
+                  <h2>Where should we send your order?</h2>
+                </div>
+              </div>
+              <span class="checkout-step-state">Required</span>
             </div>
-          </div>
 
-          <form class="checkout-form" id="checkout-form">
-            <div class="form-grid">
+            <div class="form-grid checkout-buyer-grid">
               <label>
-                Buyer Name
-                <input type="text" name="buyerName" placeholder="Your name" required>
+                Company Name
+                <input type="text" name="companyName" placeholder="Company or organization">
+              </label>
+              <label>
+                Contact Person
+                <input type="text" name="buyerName" placeholder="Full name" required>
               </label>
               <label>
                 Email
-                <input type="email" name="email" placeholder="Your email" required>
+                <input type="email" name="email" placeholder="name@company.com" required>
               </label>
               <label>
                 Phone
-                <input type="tel" name="phone" placeholder="Your phone number">
+                <input type="tel" name="phone" placeholder="International phone number">
               </label>
               <label>
                 Country / Region
                 <input type="text" name="country" placeholder="Destination country or region" required>
               </label>
+              <label class="checkout-address-field">
+                Shipping Address
+                <textarea name="address" rows="2" placeholder="Street, city, state, postal code" required></textarea>
+              </label>
             </div>
-
-            <label>
-              Shipping Address
-              <textarea name="address" rows="3" placeholder="Street, city, state, postal code" required></textarea>
-            </label>
-
-            <label>
-              Quantity
-              <input id="quantity-input" type="number" name="quantity" step="1" required>
-            </label>
-            <p class="checkout-quantity-note" id="checkout-quantity-note" aria-live="polite"></p>
 
             <div class="form-grid" id="checkout-currency" hidden></div>
 
-            <label>
+            <label class="checkout-notes-field">
               Notes
               <textarea
                 name="notes"
-                rows="4"
+                rows="2"
                 placeholder="Share finish, color, quantity split, delivery notes, or workspace requirements"
               ></textarea>
             </label>
+          </section>
 
+          <section class="checkout-flow-card checkout-payment-section reveal">
+            <div class="checkout-panel-head">
+              <div>
+                <span class="checkout-step-index">03</span>
+                <div>
+                  <p class="eyebrow">Payment Method</p>
+                  <h2>Choose how you want to pay</h2>
+                </div>
+              </div>
+              <span class="checkout-step-state">One selection</span>
+            </div>
             <div class="payment-methods" id="checkout-payment-methods">
-              <p class="checkout-field-label">Payment Method</p>
               <div class="payment-method-grid" id="checkout-payment-method-grid"></div>
             </div>
 
-            <div class="checkout-note-box">
-              <strong>Important</strong>
-              <p id="checkout-next-step-note">Your order details will be reviewed on the next step before any payment method is selected.</p>
+            <div class="checkout-payment-action-row">
+              <div class="checkout-note-box">
+                <strong>What happens next</strong>
+                <p id="checkout-next-step-note">Your order will be created before you continue to payment.</p>
+              </div>
+              <button class="btn btn-primary" id="checkout-action-button" type="submit">Continue to Payment</button>
             </div>
-
-            <button class="btn btn-primary btn-full" id="checkout-action-button" type="submit">Continue to Payment</button>
             <p class="form-status checkout-status" aria-live="polite"></p>
-          </form>
+          </section>
+        </form>
+
+        <section class="checkout-trust-bar reveal" aria-label="Checkout assurances">
+          <div><span class="checkout-trust-icon" aria-hidden="true">&#10003;</span><strong>Secure Payment</strong></div>
+          <div><span class="checkout-trust-icon" aria-hidden="true">&#10003;</span><strong>Worldwide Shipping</strong></div>
+          <div><span class="checkout-trust-icon" aria-hidden="true">&#10003;</span><strong>24/7 Support</strong></div>
+          <div><span class="checkout-trust-icon" aria-hidden="true">&#10003;</span><strong>Buyer Protection</strong></div>
         </section>
       </div>
     </section>

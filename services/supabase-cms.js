@@ -14,6 +14,7 @@ const APP_SETTING_SECTIONS = new Set([
   "themeColor",
   "systemConfig",
   "bankTransferSettings",
+  "cryptoPaymentSettings",
 ]);
 const ALLOWED_SECTIONS = new Set([...WEBSITE_SECTIONS, ...APP_SETTING_SECTIONS]);
 const LOGO_FALLBACK_PATH = "/assets/brand/avelixlink-mark.png";
@@ -216,6 +217,14 @@ const normalizeBankTransferSettings = (value) => {
     hkd: normalizeAccount(source.hkd),
   };
 };
+const normalizeCryptoPaymentSettings = (value) => {
+  const source = asObject(value);
+  return {
+    asset: "USDT",
+    network: "TRC20",
+    walletAddress: asText(source.walletAddress),
+  };
+};
 const asNullableText = (value) => {
   const normalized = String(value ?? "").trim();
   return normalized || null;
@@ -378,6 +387,7 @@ const buildDefaultSiteConfig = () => {
       themeColor: asText(settings.themeColor, "#111827"),
       systemConfig: asText(settings.systemConfig),
       bankTransferSettings: normalizeBankTransferSettings(settings.bankTransferSettings),
+      cryptoPaymentSettings: normalizeCryptoPaymentSettings(settings.cryptoPaymentSettings),
     },
   };
 };
@@ -410,6 +420,10 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
   const bankTransferCms =
     systemConfig.cms?.bankTransferSettings && typeof systemConfig.cms.bankTransferSettings === "object"
       ? systemConfig.cms.bankTransferSettings
+      : {};
+  const cryptoPaymentCms =
+    systemConfig.cms?.cryptoPaymentSettings && typeof systemConfig.cms.cryptoPaymentSettings === "object"
+      ? systemConfig.cms.cryptoPaymentSettings
       : {};
 
   return {
@@ -490,6 +504,10 @@ const normalizeSiteConfig = (websiteRow, appRow) => {
       bankTransferSettings: normalizeBankTransferSettings({
         ...defaults.settings.bankTransferSettings,
         ...bankTransferCms,
+      }),
+      cryptoPaymentSettings: normalizeCryptoPaymentSettings({
+        ...defaults.settings.cryptoPaymentSettings,
+        ...cryptoPaymentCms,
       }),
     },
   };
@@ -617,6 +635,12 @@ const serializeAppSettingsRow = (config, existingRow) => {
     !Array.isArray(nextCms.bankTransferSettings)
       ? { ...nextCms.bankTransferSettings }
       : {};
+  const nextCryptoPaymentCms =
+    nextCms.cryptoPaymentSettings &&
+    typeof nextCms.cryptoPaymentSettings === "object" &&
+    !Array.isArray(nextCms.cryptoPaymentSettings)
+      ? { ...nextCms.cryptoPaymentSettings }
+      : {};
   const nextPaymentMethodCurrencies =
     nextCms.paymentMethodCurrencies &&
     typeof nextCms.paymentMethodCurrencies === "object" &&
@@ -660,6 +684,16 @@ const serializeAppSettingsRow = (config, existingRow) => {
     };
   } else {
     delete nextCms.bankTransferSettings;
+  }
+
+  const normalizedCryptoPaymentSettings = normalizeCryptoPaymentSettings(config?.settings?.cryptoPaymentSettings);
+  if (normalizedCryptoPaymentSettings.walletAddress) {
+    nextCms.cryptoPaymentSettings = {
+      ...nextCryptoPaymentCms,
+      ...normalizedCryptoPaymentSettings,
+    };
+  } else {
+    delete nextCms.cryptoPaymentSettings;
   }
 
   return {
@@ -737,7 +771,15 @@ const toPatchPayload = (input) => {
     patch.homepage = asObject(source.homepage);
   }
 
-  ["paymentMethods", "paymentMethodCurrencies", "language", "themeColor", "systemConfig", "bankTransferSettings"].forEach((key) => {
+  [
+    "paymentMethods",
+    "paymentMethodCurrencies",
+    "language",
+    "themeColor",
+    "systemConfig",
+    "bankTransferSettings",
+    "cryptoPaymentSettings",
+  ].forEach((key) => {
     if (source[key] !== undefined) {
       if (!patch.settings) {
         patch.settings = {};

@@ -6,11 +6,13 @@ const navLinks = document.querySelector(".nav-links");
 const menuItems = document.querySelectorAll(".nav-links a");
 const productRoot = document.querySelector("#payment-product");
 const totalsRoot = document.querySelector("#payment-totals");
-const paymentMethodGrid = document.querySelector("#payment-method-grid");
+const paymentMethodInput = document.querySelector("#payment-method-value");
+const paymentOverviewRoot = document.querySelector("#payment-overview");
 const paymentForm = document.querySelector("#payment-form");
 const paymentStatus = document.querySelector("#payment-status");
 const paymentDetailsRoot = document.querySelector("#payment-details-container");
 const backLink = document.querySelector("#payment-back-link");
+const secondaryBackLink = document.querySelector("#payment-secondary-back-link");
 const routes = window.ApexLinkRoutes || {
   products: "/products",
   checkout: "/checkout",
@@ -24,15 +26,18 @@ let currentPayments = [];
 let currentSiteSettings = null;
 let isCapturingPayPal = false;
 let currentOrderAccessToken = "";
+let currentPaymentMethod = "";
 const BANK_TRANSFER_PROVIDER = "bank_transfer";
+const CRYPTO_PAYMENT_PROVIDER = "crypto_manual";
 const WORLD_FIRST_SETTLEMENT_CHANNEL = "WorldFirst";
-const IMPLEMENTED_PAYMENT_METHODS = ["PayPal", "Bank Transfer"];
-const RETAIL_PAYMENT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer"];
-const WHOLESALE_PAYMENT_SUPPORTED_METHODS = ["Bank Transfer", "PayPal"];
+const IMPLEMENTED_PAYMENT_METHODS = ["PayPal", "Bank Transfer", "Cryptocurrency"];
+const RETAIL_PAYMENT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer", "Cryptocurrency"];
+const WHOLESALE_PAYMENT_SUPPORTED_METHODS = ["Bank Transfer", "PayPal", "Cryptocurrency"];
 const SUPPORTED_PAYMENT_CURRENCIES = ["USD", "HKD"];
 const PAYMENT_METHOD_COPY = {
   paypal: "Pay securely with PayPal",
   "bank transfer": "Pay by international SWIFT wire transfer",
+  cryptocurrency: "Pay USDT on the TRC20 network",
 };
 
 const escapeHtml = (value) =>
@@ -114,6 +119,7 @@ const normalizePaymentMethodKey = (value) =>
     .trim()
     .toLowerCase()
     .replace(/[_-]+/g, " ");
+const isValidTrc20Address = (value) => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(String(value || "").trim());
 const getConfiguredPaymentMethods = () => {
   const baseMethods = Array.isArray(currentSiteSettings?.paymentMethods)
     ? currentSiteSettings.paymentMethods
@@ -142,6 +148,11 @@ const isBankTransferMethod = (value) => normalizePaymentMethodKey(value) === "ba
 const isBankTransferPayment = (payment) =>
   isBankTransferMethod(payment?.paymentMethod) ||
   String(payment?.paymentProvider || "").trim().toLowerCase() === BANK_TRANSFER_PROVIDER;
+const isCryptoPaymentMethod = (value) =>
+  ["cryptocurrency", "usdt cryptocurrency", "usdt"].includes(normalizePaymentMethodKey(value));
+const isCryptoPayment = (payment) =>
+  isCryptoPaymentMethod(payment?.paymentMethod) ||
+  String(payment?.paymentProvider || "").trim().toLowerCase() === CRYPTO_PAYMENT_PROVIDER;
 
 const fetchOrderPayments = async (orderId) => {
   const payload = await requestJson(`/api/customer/orders/${encodeURIComponent(orderId)}/payments`, {
@@ -252,6 +263,17 @@ const resolveBankTransferAccount = (currency) => {
   };
 };
 
+const resolveCryptoPaymentSettings = () => {
+  const settings = currentSiteSettings?.cryptoPaymentSettings || {};
+  const walletAddress = String(settings.walletAddress || "").trim();
+  return {
+    asset: "USDT",
+    network: "TRC20",
+    walletAddress,
+    available: isValidTrc20Address(walletAddress) && normalizeCurrencyCode(currentOrder?.currency || "USD") === "USD",
+  };
+};
+
 const getPaymentMethods = (mode) => {
   const configured = getConfiguredPaymentMethods();
   const supportedMethods = mode === "retail" ? RETAIL_PAYMENT_SUPPORTED_METHODS : WHOLESALE_PAYMENT_SUPPORTED_METHODS;
@@ -266,6 +288,9 @@ const getPaymentMethods = (mode) => {
       }
       if (normalizedMethod === "bank transfer") {
         return resolveBankTransferAccount(currentOrder?.currency || "USD").available;
+      }
+      if (normalizedMethod === "cryptocurrency") {
+        return resolveCryptoPaymentSettings().available;
       }
       return false;
     })
@@ -310,6 +335,11 @@ const getPendingBankTransferPayment = (payments) =>
     .filter((payment) => isBankTransferPayment(payment))
     .slice()
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0] || null;
+const getPendingCryptoPayment = (payments) =>
+  (Array.isArray(payments) ? payments : [])
+    .filter((payment) => isCryptoPayment(payment))
+    .slice()
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0] || null;
 
 const getPaymentTypeLabel = (type) =>
   ({
@@ -319,8 +349,22 @@ const getPaymentTypeLabel = (type) =>
     refund: "Refund",
   }[String(type || "").trim().toLowerCase()] || "Full Payment");
 
+const canonicalPaymentMethod = (value) => {
+  const normalized = normalizePaymentMethodKey(value);
+  if (normalized === "paypal") {
+    return "PayPal";
+  }
+  if (normalized === "bank transfer") {
+    return "Bank Transfer";
+  }
+  if (["cryptocurrency", "usdt cryptocurrency", "usdt"].includes(normalized)) {
+    return "Cryptocurrency";
+  }
+  return "";
+};
+
 const getSelectedPaymentMethod = () =>
-  String(paymentForm?.querySelector('input[name="paymentMethod"]:checked')?.value || "").trim();
+  String(paymentMethodInput?.value || currentPaymentMethod || "").trim();
 
 const getInitialPaymentMethod = () => {
   const params = new URLSearchParams(window.location.search);
@@ -332,49 +376,29 @@ const getInitialPaymentMethod = () => {
     return "PayPal";
   }
 
-  return "";
+  const latestPayment = (Array.isArray(currentPayments) ? currentPayments : [])
+    .slice()
+    .sort((left, right) => new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime())
+    .find((payment) => canonicalPaymentMethod(payment.paymentMethod));
+  const persistedMethod = canonicalPaymentMethod(latestPayment?.paymentMethod || currentOrder?.paymentMethod);
+  if (persistedMethod) {
+    return persistedMethod;
+  }
+
+  return getPaymentMethods(currentOrder?.purchaseMode || "retail")[0] || "";
 };
 
 const renderPaymentMethods = (mode, selectedMethod = "", options = {}) => {
-  if (!paymentMethodGrid) {
-    return;
-  }
-
   const methods = getPaymentMethods(mode);
   const lockedMethod = String(options.lockedMethod || "").trim();
-  if (!methods.length) {
-    paymentMethodGrid.innerHTML = `
-      <div class="checkout-note-box">
-        <strong>No payment methods enabled</strong>
-        <p>${
-          normalizeCurrencyCode(currentOrder?.currency || "USD") === "HKD"
-            ? "No configured payment method is currently available for HKD. Please contact our team for manual assistance."
-            : "Please contact our team for a manual payment arrangement."
-        }</p>
-      </div>
-    `;
-    return;
+  currentPaymentMethod = canonicalPaymentMethod(lockedMethod || selectedMethod);
+  if (!currentPaymentMethod && methods.length) {
+    currentPaymentMethod = methods[0];
   }
-  paymentMethodGrid.innerHTML = methods
-    .map(
-      (method, index) => `
-        <label class="payment-method-card">
-          <input
-            type="radio"
-            name="paymentMethod"
-            value="${escapeHtml(method)}"
-            ${selectedMethod === method ? "checked" : ""}
-            ${lockedMethod ? "disabled" : ""}
-          >
-          <span class="payment-method-indicator" aria-hidden="true"></span>
-          <span class="payment-method-copy">
-            <span class="payment-method-label">${escapeHtml(method)}</span>
-            <span class="payment-method-description">${escapeHtml(getPaymentMethodDescription(method))}</span>
-          </span>
-        </label>
-      `
-    )
-    .join("");
+  if (paymentMethodInput) {
+    paymentMethodInput.value = currentPaymentMethod;
+  }
+  renderPaymentOverview();
 };
 
 const getPaymentSubmitButton = () => paymentForm?.querySelector('button[type="submit"]') || null;
@@ -385,6 +409,7 @@ const setSubmitButtonState = () => {
     return;
   }
   const activeBankTransferPayment = getPendingBankTransferPayment(currentPayments);
+  const activeCryptoPayment = getPendingCryptoPayment(currentPayments);
   const selectedMethod = getSelectedPaymentMethod();
   const availableMethods = getPaymentMethods(currentOrder.purchaseMode || "retail");
 
@@ -402,7 +427,13 @@ const setSubmitButtonState = () => {
 
   if (isSubmittingPayment) {
     submitButton.disabled = true;
-    submitButton.textContent = currentOrder.purchaseMode === "retail" ? "Redirecting to PayPal..." : "Saving Payment Method...";
+    submitButton.textContent = isCryptoPaymentMethod(selectedMethod)
+      ? "Submitting USDT Payment..."
+      : isBankTransferMethod(selectedMethod)
+        ? activeBankTransferPayment
+          ? "Uploading Payment Proof..."
+          : "Preparing Bank Transfer..."
+        : "Redirecting to PayPal...";
     return;
   }
 
@@ -430,14 +461,30 @@ const setSubmitButtonState = () => {
     !isPaidStatus(activeBankTransferPayment.status)
   ) {
     submitButton.disabled = false;
-    submitButton.textContent = activeBankTransferPayment.paymentProofUrl ? "Update Payment Proof" : "Submit Payment Proof";
+    submitButton.textContent = activeBankTransferPayment.paymentProofUrl
+      ? "Update Payment Proof"
+      : "I Have Completed the Payment";
+    return;
+  }
+
+  if (
+    isCryptoPaymentMethod(selectedMethod) &&
+    activeCryptoPayment &&
+    !isPaidStatus(activeCryptoPayment.status)
+  ) {
+    submitButton.disabled = false;
+    submitButton.textContent = "Submit USDT Payment Proof";
     return;
   }
 
   if (currentOrder.purchaseMode === "retail") {
     submitButton.disabled = false;
     submitButton.textContent =
-      selectedMethod === "Bank Transfer" ? "Continue with SWIFT Transfer" : "Pay with PayPal";
+      selectedMethod === "Bank Transfer"
+        ? "Continue with SWIFT Transfer"
+        : selectedMethod === "Cryptocurrency"
+          ? "Continue with USDT"
+          : "Pay with PayPal";
     return;
   }
 
@@ -447,7 +494,9 @@ const setSubmitButtonState = () => {
     ? "Payment Method Confirmed"
     : selectedMethod === "Bank Transfer"
       ? "Submit SWIFT Transfer Order"
-      : "Pay with PayPal";
+      : selectedMethod === "Cryptocurrency"
+        ? "Submit USDT Payment Order"
+        : "Pay with PayPal";
 };
 
 const renderCustomerInfoHtml = (order) => `
@@ -507,6 +556,7 @@ const buildPaymentRecordPayload = (order, paymentType, paymentMethod) => {
         ? balanceAmount || orderTotal
         : orderTotal;
   const bankTransferAccount = isBankTransferMethod(paymentMethod) ? getBankTransferAccount(order) : null;
+  const cryptoSettings = isCryptoPaymentMethod(paymentMethod) ? resolveCryptoPaymentSettings() : null;
 
   return {
     orderId: order.orderId || order.id,
@@ -516,10 +566,16 @@ const buildPaymentRecordPayload = (order, paymentType, paymentMethod) => {
     customerPhone: order.phone || "",
     orderType: order.purchaseMode || "retail",
     paymentMethod,
-    paymentProvider: isBankTransferMethod(paymentMethod) ? BANK_TRANSFER_PROVIDER : "paypal",
+    paymentProvider: isBankTransferMethod(paymentMethod)
+      ? BANK_TRANSFER_PROVIDER
+      : isCryptoPaymentMethod(paymentMethod)
+        ? CRYPTO_PAYMENT_PROVIDER
+        : "paypal",
     settlementChannel: isBankTransferMethod(paymentMethod)
       ? String(bankTransferAccount?.settlementChannel || bankTransferAccount?.providerName || WORLD_FIRST_SETTLEMENT_CHANNEL)
-      : WORLD_FIRST_SETTLEMENT_CHANNEL,
+      : isCryptoPaymentMethod(paymentMethod)
+        ? cryptoSettings?.network || "TRC20"
+        : WORLD_FIRST_SETTLEMENT_CHANNEL,
     paymentType,
     amount,
     currency: order.currency || "USD",
@@ -527,6 +583,14 @@ const buildPaymentRecordPayload = (order, paymentType, paymentMethod) => {
     balanceAmount,
     billingAddress: order.shippingAddress || "",
     status: "pending",
+    ...(isCryptoPaymentMethod(paymentMethod)
+      ? {
+          cryptoAsset: "USDT",
+          cryptoNetwork: "TRC20",
+          cryptoWalletAddress: cryptoSettings?.walletAddress || "",
+          cryptoExpectedAmount: amount,
+        }
+      : {}),
   };
 };
 
@@ -536,6 +600,33 @@ const getCurrentPaymentAmountDue = () => {
     return 0;
   }
   return buildPaymentRecordPayload(currentOrder, paymentType, "PayPal").amount;
+};
+
+const renderPaymentOverview = () => {
+  if (!paymentOverviewRoot || !currentOrder) {
+    return;
+  }
+  const paymentType = getNextPaymentType(currentOrder, currentPayments);
+  const methodLabel = currentPaymentMethod === "Cryptocurrency" ? "USDT Cryptocurrency" : currentPaymentMethod || "-";
+  const amountDue = getCurrentPaymentAmountDue();
+  paymentOverviewRoot.innerHTML = `
+    <div>
+      <span>Order Number</span>
+      <strong>${escapeHtml(currentOrder.orderNumber || currentOrder.orderId || currentOrder.id || "-")}</strong>
+    </div>
+    <div>
+      <span>Payment Method</span>
+      <strong>${escapeHtml(methodLabel)}</strong>
+    </div>
+    <div class="payment-overview-amount">
+      <span>Amount Due</span>
+      <strong>${escapeHtml(formatCurrency(amountDue, currentOrder.currency || "USD"))}</strong>
+    </div>
+    <div>
+      <span>Payment For</span>
+      <strong>${escapeHtml(paymentType ? getPaymentTypeLabel(paymentType) : "Payment Completed")}</strong>
+    </div>
+  `;
 };
 
 const getBankTransferCurrencyKey = (order) => {
@@ -559,8 +650,11 @@ const getBankTransferDetailsHtml = () => {
   const detailFields = [
     ["Beneficiary Name", details.beneficiaryName],
     ["Bank Name", details.bankName],
-    ["Account Number", details.accountNumber],
     ["SWIFT / BIC", details.swiftBic],
+    ["Account Number", details.accountNumber],
+    ["Currency", bankTransferAccount.currency],
+    ["Amount", formatCurrency(getCurrentPaymentAmountDue(), currentOrder.currency || "USD")],
+    ["Reference / Remarks", currentOrder.orderNumber || currentOrder.orderId || currentOrder.id || "-"],
     ["Bank Address", details.bankAddress],
     ["Beneficiary Address", details.beneficiaryAddress],
     ["Intermediary Bank", details.intermediaryBank],
@@ -572,52 +666,45 @@ const getBankTransferDetailsHtml = () => {
     ? detailFields
         .map(
           ([label, value]) => `
-            <div class="checkout-summary-row full"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
+            <div class="payment-bank-table-row"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>
           `
         )
         .join("")
-    : `<div class="checkout-summary-row full"><span>Account Status</span><strong>Unavailable</strong></div>`;
+    : `<div class="payment-bank-table-row"><span>Account Status</span><strong>Unavailable</strong></div>`;
 
   return `
-    <div class="checkout-note-box payment-details-card">
-      ${renderCustomerInfoHtml(currentOrder)}
-    </div>
-    <div class="checkout-note-box bank-transfer-box payment-details-card">
+    <div class="bank-transfer-box payment-details-card payment-instruction-card">
       <div class="payment-info-box-head">
-        <strong>SWIFT Bank Transfer Instructions</strong>
-        <p>Use the receiving account below to complete your international SWIFT wire transfer.</p>
-      </div>
-      <div class="payment-bank-transfer-highlights">
         <div>
-          <span>Amount</span>
-        <strong>${escapeHtml(formatCurrency(getCurrentPaymentAmountDue(), currentOrder.currency || "USD"))}</strong>
+          <span class="payment-method-kicker">Selected payment method</span>
+          <strong>Bank Transfer Instructions</strong>
+          <p>Use the receiving account below to complete your international SWIFT wire transfer.</p>
         </div>
-        <div>
-          <span>Currency</span>
-          <strong>${escapeHtml(bankTransferAccount.currency)}</strong>
-        </div>
-        <div>
-          <span>Order Reference</span>
-          <strong>${escapeHtml(currentOrder.orderNumber || currentOrder.orderId || currentOrder.id || "-")}</strong>
-        </div>
+        <span class="payment-method-status">Bank Transfer</span>
       </div>
-      <div class="checkout-note-box payment-inline-note">
-        <strong>Please include this order reference in your SWIFT transfer payment reference/message.</strong>
-      </div>
-      <div class="checkout-summary-facts compact payment-bank-transfer-details">
-        <div><span>Payment Method</span><strong>Bank Transfer</strong></div>
-        <div><span>Transfer Type</span><strong>SWIFT International Wire Transfer</strong></div>
-        <div><span>Settlement Channel</span><strong>${escapeHtml(bankTransferAccount.settlementChannel)}</strong></div>
+      <div class="payment-bank-table" aria-label="Bank transfer account details">
         ${detailRows}
+      </div>
+      <div class="payment-important-notes">
+        <strong>Important Notes</strong>
+        <ul>
+          <li>Include the order number in the transfer reference or remarks.</li>
+          <li>Transfer fees must be paid by the sender.</li>
+          <li>Bank transfers are normally confirmed within 1-2 business days.</li>
+          <li>You will receive an email when the payment is confirmed.</li>
+        </ul>
       </div>
     </div>
     ${
       paymentId
         ? `
-          <div class="checkout-note-box bank-transfer-proof-box payment-details-card">
+          <div class="bank-transfer-proof-box payment-details-card payment-proof-card">
             <div class="payment-info-box-head">
-              <strong>Upload Payment Proof</strong>
-              <p>Upload your transfer receipt and add the SWIFT transaction reference so our team can confirm the payment.</p>
+              <div>
+                <span class="payment-method-kicker">Verification</span>
+                <strong>Upload Payment Proof</strong>
+                <p>Add your transaction reference and transfer receipt for verification.</p>
+              </div>
             </div>
             <input type="hidden" name="bankTransferPaymentId" value="${escapeHtml(paymentId)}">
             <div class="form-grid bank-transfer-proof-grid">
@@ -625,9 +712,13 @@ const getBankTransferDetailsHtml = () => {
                 Transaction Reference
                 <input type="text" name="transactionReference" value="${escapeHtml(transactionReference)}" placeholder="Reference shown on your transfer receipt" required>
               </label>
-              <label>
-                Upload Payment Proof
-                <input type="file" name="paymentProof" accept="image/png,image/jpeg,image/webp" ${proofUrl ? "" : "required"}>
+              <label class="payment-proof-upload">
+                <span>Upload Payment Proof</span>
+                <span class="payment-proof-dropzone">
+                  <strong>Choose a receipt to upload</strong>
+                  <small>PNG, JPG or WEBP up to the configured upload limit</small>
+                  <input type="file" name="paymentProof" accept="image/png,image/jpeg,image/webp" ${proofUrl ? "" : "required"}>
+                </span>
               </label>
             </div>
             ${
@@ -638,10 +729,13 @@ const getBankTransferDetailsHtml = () => {
           </div>
         `
         : `
-          <div class="checkout-note-box bank-transfer-proof-box payment-details-card">
+          <div class="bank-transfer-proof-box payment-details-card payment-proof-card">
             <div class="payment-info-box-head">
-              <strong>Next Step</strong>
-              <p>Confirm the SWIFT transfer method first. After the payment record is created, this page will let you upload your proof.</p>
+              <div>
+                <span class="payment-method-kicker">Next Step</span>
+                <strong>Prepare your transfer</strong>
+                <p>Continue to create the bank transfer record. You can then upload the payment proof on this page.</p>
+              </div>
             </div>
           </div>
         `
@@ -649,14 +743,87 @@ const getBankTransferDetailsHtml = () => {
   `;
 };
 
+const getCryptoPaymentDetailsHtml = () => {
+  const activePayment = getPendingCryptoPayment(currentPayments);
+  const configured = resolveCryptoPaymentSettings();
+  const walletAddress = String(activePayment?.cryptoWalletAddress || configured.walletAddress || "").trim();
+  const network = String(activePayment?.cryptoNetwork || configured.network || "TRC20").trim().toUpperCase();
+  const cryptoAsset = String(activePayment?.cryptoAsset || configured.asset || "USDT").trim().toUpperCase();
+  const cryptoAmount = Number(
+    activePayment?.cryptoExpectedAmount || activePayment?.amount || getCurrentPaymentAmountDue() || 0
+  );
+  const txHash = String(activePayment?.cryptoTxHash || "").trim();
+  const proofUrl = String(activePayment?.paymentProofUrl || "").trim();
+
+  return `
+    <div class="checkout-note-box payment-details-card">
+      ${renderCustomerInfoHtml(currentOrder)}
+    </div>
+    <div class="checkout-note-box crypto-payment-box payment-details-card">
+      <div class="payment-info-box-head">
+        <strong>USDT Payment Instructions</strong>
+        <p>Send the exact amount to the TRC20 address below. Manual verification is required before fulfillment begins.</p>
+      </div>
+      <div class="payment-bank-transfer-highlights">
+        <div><span>Order Amount USD</span><strong>${escapeHtml(formatCurrency(cryptoAmount, "USD"))}</strong></div>
+        <div><span>USDT Amount</span><strong>${escapeHtml(cryptoAmount.toFixed(6))} USDT</strong></div>
+        <div><span>Network</span><strong>${escapeHtml(network)}</strong></div>
+      </div>
+      <div class="crypto-payment-instructions">
+        <div class="crypto-wallet-details">
+          <span>USDT receiving address</span>
+          <strong>${escapeHtml(walletAddress || "Wallet address unavailable")}</strong>
+          <small>Only send ${escapeHtml(cryptoAsset)} using ${escapeHtml(network)}. Sending another asset or network may result in permanent loss.</small>
+        </div>
+        <div class="crypto-qr-placeholder" aria-label="QR code placeholder">
+          <span>QR</span>
+          <small>Scan support coming later</small>
+        </div>
+      </div>
+      <div class="checkout-summary-facts compact">
+        <div><span>Order Reference</span><strong>${escapeHtml(currentOrder.orderNumber || currentOrder.orderId || currentOrder.id || "-")}</strong></div>
+        <div><span>Verification</span><strong>Manual</strong></div>
+      </div>
+    </div>
+    ${activePayment?.id ? `
+      <div class="checkout-note-box crypto-proof-box payment-details-card">
+        <div class="payment-info-box-head">
+          <strong>Submit Payment Proof</strong>
+          <p>Enter the TRC20 transaction hash. A screenshot is optional.</p>
+        </div>
+        <input type="hidden" name="cryptoPaymentId" value="${escapeHtml(activePayment.id)}">
+        <div class="form-grid bank-transfer-proof-grid">
+          <label>
+            TX Hash
+            <input type="text" name="cryptoTxHash" value="${escapeHtml(txHash)}" placeholder="64-character TRC20 transaction hash" minlength="64" maxlength="64" required>
+          </label>
+          <label>
+            Optional Screenshot
+            <input type="file" name="cryptoProof" accept="image/png,image/jpeg,image/webp">
+          </label>
+        </div>
+        ${proofUrl ? `<p class="bank-transfer-proof-link">Current screenshot: <a href="${escapeHtml(proofUrl)}" target="_blank" rel="noreferrer">View uploaded proof</a></p>` : ""}
+      </div>
+    ` : `
+      <div class="checkout-note-box crypto-proof-box payment-details-card">
+        <div class="payment-info-box-head">
+          <strong>Next Step</strong>
+          <p>Confirm USDT as the payment method first. The transaction hash form will then appear here.</p>
+        </div>
+      </div>
+    `}
+  `;
+};
+
 const getPayPalDetailsHtml = () => `
-  <div class="checkout-note-box payment-details-card">
-    ${renderCustomerInfoHtml(currentOrder)}
-  </div>
-  <div class="checkout-note-box paypal-payment-box payment-details-card">
+  <div class="paypal-payment-box payment-details-card payment-instruction-card">
     <div class="payment-info-box-head">
-      <strong>PayPal Payment</strong>
-      <p>Review the payment summary below, then continue with the real PayPal checkout flow.</p>
+      <div>
+        <span class="payment-method-kicker">Selected payment method</span>
+        <strong>PayPal Checkout</strong>
+        <p>You will continue to PayPal to complete this payment securely.</p>
+      </div>
+      <span class="payment-method-status">PayPal</span>
     </div>
     <div class="payment-bank-transfer-highlights payment-paypal-highlights">
       <div>
@@ -671,6 +838,10 @@ const getPayPalDetailsHtml = () => `
         <span>Order Reference</span>
         <strong>${escapeHtml(currentOrder?.orderNumber || currentOrder?.orderId || currentOrder?.id || "-")}</strong>
       </div>
+    </div>
+    <div class="payment-important-notes payment-paypal-note">
+      <strong>Secure PayPal payment</strong>
+      <p>Your payment is confirmed only after PayPal capture succeeds. AvelixLink never receives your PayPal password.</p>
     </div>
   </div>
 `;
@@ -687,6 +858,7 @@ const renderPaymentDetails = (method = "") => {
   }
 
   const normalizedMethod = normalizePaymentMethodKey(method);
+  renderPaymentOverview();
   if (!normalizedMethod) {
     hidePaymentDetails();
     return;
@@ -699,6 +871,11 @@ const renderPaymentDetails = (method = "") => {
 
   if (normalizedMethod === "paypal") {
     paymentDetailsRoot.innerHTML = getPayPalDetailsHtml();
+    return;
+  }
+
+  if (normalizedMethod === "cryptocurrency") {
+    paymentDetailsRoot.innerHTML = getCryptoPaymentDetailsHtml();
     return;
   }
 
@@ -785,10 +962,6 @@ const renderEmptyState = (message = "Please complete the checkout details step b
     totalsRoot.innerHTML = "";
   }
 
-  if (paymentMethodGrid) {
-    paymentMethodGrid.innerHTML = "";
-  }
-
   hidePaymentDetails();
 };
 
@@ -851,6 +1024,7 @@ const setupPaymentForm = () => {
       const formData = new FormData(paymentForm);
       const paymentMethod = String(formData.get("paymentMethod") || getSelectedPaymentMethod() || "").trim();
       const activeBankTransferPayment = getPendingBankTransferPayment(currentPayments);
+      const activeCryptoPayment = getPendingCryptoPayment(currentPayments);
 
       if (!paymentMethod) {
         throw new Error("No payment method selected.");
@@ -898,11 +1072,50 @@ const setupPaymentForm = () => {
             ? "Bank transfer proof submitted. Our team will review it shortly."
             : "Bank transfer details updated.";
         }
+        isSubmittingPayment = false;
         setSubmitButtonState();
         return;
       }
 
-      if (!isBankTransferMethod(paymentMethod)) {
+      if (
+        isCryptoPaymentMethod(paymentMethod) &&
+        activeCryptoPayment &&
+        !isPaidStatus(activeCryptoPayment.status)
+      ) {
+        const paymentId = String(formData.get("cryptoPaymentId") || activeCryptoPayment.id || "").trim();
+        const txHash = String(formData.get("cryptoTxHash") || "").trim();
+        const paymentProof = formData.get("cryptoProof");
+
+        if (!paymentId) {
+          throw new Error("USDT payment record is missing.");
+        }
+        if (!/^[a-fA-F0-9]{64}$/.test(txHash)) {
+          throw new Error("Please enter a valid 64-character TRC20 transaction hash.");
+        }
+
+        const uploadFormData = new FormData();
+        uploadFormData.set("paymentId", paymentId);
+        uploadFormData.set("txHash", txHash);
+        if (paymentProof instanceof File && paymentProof.size) {
+          uploadFormData.set("file", paymentProof);
+        }
+
+        await requestForm(
+          `/api/customer/orders/${encodeURIComponent(currentOrder.id)}/crypto-payment-proof`,
+          uploadFormData,
+          { method: "POST" }
+        );
+        currentPayments = await fetchOrderPayments(currentOrder.id);
+        renderPaymentDetails("Cryptocurrency");
+        if (paymentStatus) {
+          paymentStatus.textContent = "USDT transaction submitted. Our team will verify it before confirming payment.";
+        }
+        isSubmittingPayment = false;
+        setSubmitButtonState();
+        return;
+      }
+
+      if (normalizePaymentMethodKey(paymentMethod) === "paypal") {
         const payload = await requestJson("/api/paypal/create-order", {
           method: "POST",
           body: JSON.stringify({
@@ -946,11 +1159,17 @@ const setupPaymentForm = () => {
       if (paymentStatus) {
         paymentStatus.textContent = isBankTransferMethod(paymentMethod)
           ? "Bank transfer payment record created. Upload your payment proof to notify our team."
-          : `${getPaymentTypeLabel(paymentRecord.paymentType)} record created. The order remains pending until manual confirmation.`;
+          : isCryptoPaymentMethod(paymentMethod)
+            ? "USDT payment record created. Submit the TRC20 transaction hash after sending payment."
+            : `${getPaymentTypeLabel(paymentRecord.paymentType)} record created. The order remains pending until manual confirmation.`;
       }
 
       renderPaymentMethods(currentOrder.purchaseMode || "retail", paymentMethod, {
-        lockedMethod: isBankTransferPayment(paymentRecord) ? "Bank Transfer" : "",
+        lockedMethod: isBankTransferPayment(paymentRecord)
+          ? "Bank Transfer"
+          : isCryptoPayment(paymentRecord)
+            ? "Cryptocurrency"
+            : "",
       });
       renderPaymentDetails(paymentMethod);
       setSubmitButtonState();
@@ -1018,6 +1237,7 @@ const handlePayPalReturnState = async () => {
 
     currentOrder = payload?.order || currentOrder;
     currentPayments = await fetchOrderPayments(currentOrder.id);
+    renderPaymentOverview();
 
     params.delete("token");
     params.delete("PayerID");
@@ -1096,6 +1316,9 @@ const initPaymentPage = async () => {
   if (backLink) {
     backLink.href = buildCheckoutUrl(currentOrder, currentProduct);
   }
+  if (secondaryBackLink) {
+    secondaryBackLink.href = buildCheckoutUrl(currentOrder, currentProduct);
+  }
 
   renderProductSummary(
     currentProduct || {
@@ -1117,10 +1340,6 @@ const initPaymentPage = async () => {
 setupNavigation();
 setupRevealAnimations();
 setupPaymentForm();
-paymentMethodGrid?.addEventListener("change", () => {
-  renderPaymentDetails(getSelectedPaymentMethod());
-  setSubmitButtonState();
-});
 syncNavbarState();
 window.addEventListener("scroll", syncNavbarState, { passive: true });
 initPaymentPage();

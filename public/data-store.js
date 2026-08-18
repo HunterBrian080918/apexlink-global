@@ -116,6 +116,11 @@
           instructions: "",
         },
       },
+      cryptoPaymentSettings: {
+        asset: "USDT",
+        network: "TRC20",
+        walletAddress: "",
+      },
     },
     homepage: {
       eyebrow: "PREMIUM WORKSPACE SOLUTIONS",
@@ -934,7 +939,8 @@
   const normalizeSettings = (value) => {
     const settings = asObject(value);
     const bankTransferSettings = asObject(settings.bankTransferSettings);
-    const SUPPORTED_PAYMENT_METHODS = new Set(["paypal", "bank transfer"]);
+    const cryptoPaymentSettings = asObject(settings.cryptoPaymentSettings);
+    const SUPPORTED_PAYMENT_METHODS = new Set(["paypal", "bank transfer", "cryptocurrency"]);
     const normalizePaymentMethodName = (method) =>
       String(method || "")
         .trim()
@@ -1007,6 +1013,11 @@
         settlementChannel: String(bankTransferSettings.settlementChannel || bankTransferSettings.providerName || "WorldFirst"),
         usd: normalizeBankTransferCurrency(bankTransferSettings.usd),
         hkd: normalizeBankTransferCurrency(bankTransferSettings.hkd),
+      },
+      cryptoPaymentSettings: {
+        asset: "USDT",
+        network: "TRC20",
+        walletAddress: String(cryptoPaymentSettings.walletAddress || "").trim(),
       },
     };
   };
@@ -2005,6 +2016,7 @@
         themeColor: nextSettings.themeColor,
         systemConfig: nextSettings.systemConfig,
         bankTransferSettings: nextSettings.bankTransferSettings,
+        cryptoPaymentSettings: nextSettings.cryptoPaymentSettings,
       }),
     });
     const cms = normalizeCmsPayload(cmsPayload?.siteConfig || cmsPayload, state?.products || []);

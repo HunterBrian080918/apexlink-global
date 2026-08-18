@@ -30,13 +30,18 @@ let currentCheckoutPaymentMethod = "";
 let currentSiteSettings = null;
 let checkoutPricingRefreshPromise = null;
 let currentOrderAccessToken = "";
-const IMPLEMENTED_CHECKOUT_PAYMENT_METHODS = ["PayPal", "Bank Transfer"];
-const RETAIL_CHECKOUT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer"];
-const WHOLESALE_CHECKOUT_SUPPORTED_METHODS = ["Bank Transfer", "PayPal"];
+const IMPLEMENTED_CHECKOUT_PAYMENT_METHODS = ["PayPal", "Bank Transfer", "Cryptocurrency"];
+const RETAIL_CHECKOUT_SUPPORTED_METHODS = ["PayPal", "Bank Transfer", "Cryptocurrency"];
+const WHOLESALE_CHECKOUT_SUPPORTED_METHODS = ["Bank Transfer", "PayPal", "Cryptocurrency"];
 const SUPPORTED_PAYMENT_CURRENCIES = ["USD", "HKD"];
 const BANK_TRANSFER_ACCOUNT_FIELDS = {
   usd: ["enabled", "beneficiaryName", "bankName", "accountNumber", "swiftBic"],
   hkd: ["enabled", "beneficiaryName", "bankName", "accountNumber", "swiftBic"],
+};
+const CHECKOUT_PAYMENT_METHOD_COPY = {
+  paypal: "Pay securely through PayPal Checkout",
+  "bank transfer": "Pay by international SWIFT bank transfer",
+  cryptocurrency: "Pay USDT using the TRC20 network",
 };
 
 const setCheckoutActionState = (label = "", disabled = false) => {
@@ -61,6 +66,7 @@ const normalizePaymentMethodName = (value) =>
     .trim()
     .toLowerCase()
     .replace(/[_-]+/g, " ");
+const isValidTrc20Address = (value) => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(String(value || "").trim());
 
 const normalizeCurrencyCode = (value) => {
   const normalized = String(value || "").trim().toUpperCase();
@@ -112,6 +118,17 @@ const resolveBankTransferAccount = (currency) => {
   };
 };
 
+const resolveCryptoPaymentSettings = () => {
+  const settings = currentSiteSettings?.cryptoPaymentSettings || {};
+  const walletAddress = String(settings.walletAddress || "").trim();
+  return {
+    asset: "USDT",
+    network: "TRC20",
+    walletAddress,
+    available: isValidTrc20Address(walletAddress) && normalizeCurrencyCode(currentOrderCurrency) === "USD",
+  };
+};
+
 const getConfiguredCheckoutPaymentMethods = () => {
   const baseMethods = Array.isArray(currentSiteSettings?.paymentMethods)
     ? currentSiteSettings.paymentMethods
@@ -146,6 +163,10 @@ const isCheckoutPaymentMethodConfigured = (method) => {
 
   if (normalizedMethod === "bank transfer") {
     return resolveBankTransferAccount(currentOrderCurrency).available;
+  }
+
+  if (normalizedMethod === "cryptocurrency") {
+    return resolveCryptoPaymentSettings().available;
   }
 
   return false;
@@ -621,7 +642,12 @@ const renderCheckoutPaymentMethods = () => {
             ${currentCheckoutPaymentMethod ? (currentCheckoutPaymentMethod === method ? "checked" : "") : index === 0 ? "checked" : ""}
           >
           <span class="payment-method-indicator" aria-hidden="true"></span>
-          <span class="payment-method-label">${escapeHtml(method)}</span>
+          <span class="payment-method-copy">
+            <span class="payment-method-label">${escapeHtml(method === "Cryptocurrency" ? "USDT Cryptocurrency" : method)}</span>
+            <span class="payment-method-description">${escapeHtml(
+              CHECKOUT_PAYMENT_METHOD_COPY[normalizePaymentMethodName(method)] || "Continue with this payment method"
+            )}</span>
+          </span>
         </label>
       `
     )
@@ -686,7 +712,7 @@ const renderTotals = () => {
       <span>Subtotal</span>
       <strong>${escapeHtml(summary.subtotalText)}</strong>
     </div>
-    <div class="checkout-total-row">
+    <div class="checkout-total-row checkout-total-row-total">
       <span>Total</span>
       <strong>${escapeHtml(summary.totalText)}</strong>
     </div>
@@ -703,11 +729,11 @@ const renderTotals = () => {
     ${
       summary.mode === "wholesale" && summary.depositValue
         ? `
-          <div class="checkout-total-row">
+          <div class="checkout-total-row checkout-total-row-highlight">
             <span>Deposit</span>
             <strong>${escapeHtml(summary.depositValue)}${summary.depositAmountText ? ` (${escapeHtml(summary.depositAmountText)})` : ""}</strong>
           </div>
-          <div class="checkout-total-row">
+          <div class="checkout-total-row checkout-total-row-highlight">
             <span>Balance</span>
             <strong>${escapeHtml(summary.balanceAmountText || "$0.00")}</strong>
           </div>
@@ -745,20 +771,14 @@ const syncCheckoutModeUi = () => {
 
   if (currentPurchaseMode === "retail") {
     const isBankTransfer = currentCheckoutPaymentMethod === "Bank Transfer";
-    setCheckoutActionState(
-      isSubmittingOrder
-        ? isBankTransfer
-          ? "Creating SWIFT Transfer..."
-          : "Preparing PayPal..."
-        : isBankTransfer
-          ? "Continue to SWIFT Transfer"
-          : "Pay with PayPal",
-      isSubmittingOrder
-    );
+    const isCrypto = currentCheckoutPaymentMethod === "Cryptocurrency";
+    setCheckoutActionState(isSubmittingOrder ? "Creating order..." : "Continue to Payment", isSubmittingOrder);
     if (checkoutNextStepNote) {
       checkoutNextStepNote.textContent = isBankTransfer
         ? "Your order will be created first, then you will be redirected to the payment page with SWIFT international wire transfer instructions."
-        : "Your retail order will be created first, then you will be redirected to PayPal Checkout.";
+        : isCrypto
+          ? "Your order will be created first, then you will continue to the payment page for USDT TRC20 instructions."
+          : "Your retail order will be created first, then you will be redirected to PayPal Checkout.";
     }
     return;
   }
@@ -768,7 +788,9 @@ const syncCheckoutModeUi = () => {
     checkoutNextStepNote.textContent =
       currentCheckoutPaymentMethod === "Bank Transfer"
         ? "Your wholesale order will be created first, then you will be redirected to SWIFT international wire transfer instructions on the payment page."
-        : "Your wholesale order will be created first, then you will continue to the payment page to confirm PayPal.";
+        : currentCheckoutPaymentMethod === "Cryptocurrency"
+          ? "Your wholesale order will be created first, then you will continue to USDT TRC20 payment instructions."
+          : "Your wholesale order will be created first, then you will continue to the payment page to confirm PayPal.";
   }
 };
 
@@ -872,31 +894,21 @@ const setupCheckoutForm = () => {
     }
 
     currentCheckoutPaymentMethod = getSelectedCheckoutPaymentMethod();
-    const originalButtonLabel =
-      currentPurchaseMode === "retail"
-        ? currentCheckoutPaymentMethod === "Bank Transfer"
-          ? "Continue to SWIFT Transfer"
-          : "Pay with PayPal"
-        : "Continue to Payment";
+    const originalButtonLabel = "Continue to Payment";
     let createdOrderId = "";
 
     try {
       isSubmittingOrder = true;
-      setCheckoutActionState(
-        currentPurchaseMode === "retail"
-          ? currentCheckoutPaymentMethod === "Bank Transfer"
-            ? "Creating SWIFT Transfer..."
-            : "Preparing PayPal..."
-          : "Creating order...",
-        true
-      );
+      setCheckoutActionState("Creating order...", true);
     if (checkoutStatus) {
       checkoutStatus.textContent = currentPurchaseMode === "retail"
         ? !getRetailCheckoutPaymentMethods().length
           ? "No retail payment methods are currently available."
           : currentCheckoutPaymentMethod === "Bank Transfer"
             ? "Creating order and preparing SWIFT transfer details..."
-            : "Creating order and preparing PayPal..."
+            : currentCheckoutPaymentMethod === "Cryptocurrency"
+              ? "Creating order and preparing USDT payment details..."
+              : "Creating order and preparing PayPal..."
         : "Creating order...";
       }
 
@@ -923,7 +935,14 @@ const setupCheckoutForm = () => {
             productId: currentProduct.id,
             currency: currentPurchaseMode === "wholesale" ? currentOrderCurrency : "USD",
             quantity: String(quantity),
-            message: String(formData.get("notes") || "").trim(),
+            message: [
+              String(formData.get("companyName") || "").trim()
+                ? `Company: ${String(formData.get("companyName") || "").trim()}`
+                : "",
+              String(formData.get("notes") || "").trim(),
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
             paymentMethod: currentCheckoutPaymentMethod,
           },
         }),
@@ -939,34 +958,8 @@ const setupCheckoutForm = () => {
         throw new Error("Secure order access token was not returned.");
       }
 
-      if (currentPurchaseMode === "retail" && currentCheckoutPaymentMethod !== "Bank Transfer") {
-        const paypalPayload = await requestJson("/api/paypal/create-order", {
-          method: "POST",
-          headers: {
-            "X-Order-Access-Token": currentOrderAccessToken,
-          },
-          body: JSON.stringify({
-            orderId: createdOrderId,
-          }),
-        });
-
-        if (!paypalPayload?.approvalUrl) {
-          throw new Error("PayPal approval URL was not returned.");
-        }
-
-        if (checkoutStatus) {
-          checkoutStatus.textContent = "Redirecting to PayPal...";
-        }
-
-        window.location.href = String(paypalPayload.approvalUrl || "");
-        return;
-      }
-
       if (checkoutStatus) {
-        checkoutStatus.textContent =
-          currentPurchaseMode === "retail" && currentCheckoutPaymentMethod === "Bank Transfer"
-            ? "Redirecting to SWIFT transfer instructions..."
-            : "Redirecting to payment...";
+        checkoutStatus.textContent = "Redirecting to payment...";
       }
 
       window.location.href = buildPaymentPageUrl(createdOrderId);
