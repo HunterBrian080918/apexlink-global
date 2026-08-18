@@ -13,6 +13,13 @@ const SUPPORTED_CRYPTO_ASSETS = Object.freeze({
   USDT: ["TRC20"],
 });
 const CRYPTO_STATUSES = new Set(["waiting", "detected", "confirming", "confirmed", "failed"]);
+const DEFAULT_REQUIRED_CONFIRMATIONS = 20;
+const getRequiredConfirmations = () => {
+  const configured = Number.parseInt(String(process.env.TRON_REQUIRED_CONFIRMATIONS || ""), 10);
+  return Number.isInteger(configured) && configured >= DEFAULT_REQUIRED_CONFIRMATIONS
+    ? configured
+    : DEFAULT_REQUIRED_CONFIRMATIONS;
+};
 
 const requireConfig = () => {
   if (!SUPABASE_URL || !SUPABASE_ADMIN_KEY) {
@@ -157,11 +164,7 @@ const updateCryptoDetection = async (paymentId, input = {}) => {
   return { payment, result };
 };
 
-const confirmCryptoPayment = async (paymentId, options = {}) => {
-  const payment = await getPaymentById(paymentId);
-  if (!payment?.id) {
-    throw new Error("Payment not found.");
-  }
+const assertCryptoPaymentConfirmable = (payment, requiredConfirmations = getRequiredConfirmations()) => {
   const cryptoStatus = String(payment.cryptoStatus || "").trim().toLowerCase();
   if (!CRYPTO_STATUSES.has(cryptoStatus)) {
     throw new Error("Payment does not contain a valid crypto detection status.");
@@ -169,12 +172,29 @@ const confirmCryptoPayment = async (paymentId, options = {}) => {
   if (!isValidTxHash(payment.cryptoTxHash)) {
     throw new Error("A detected transaction hash is required before confirmation.");
   }
-  if (!["confirming", "confirmed"].includes(cryptoStatus) || Number(payment.cryptoConfirmations || 0) < 1) {
-    throw new Error("The crypto transaction has not reached a confirmable state.");
+  if (
+    !["confirming", "confirmed"].includes(cryptoStatus) ||
+    Number(payment.cryptoConfirmations || 0) < requiredConfirmations
+  ) {
+    const confirmationError = new Error(
+      `The crypto transaction requires at least ${requiredConfirmations} confirmations before payment can be confirmed.`
+    );
+    confirmationError.status = 409;
+    throw confirmationError;
   }
   if (toUsdtUnits(payment.cryptoReceivedAmount) + 1n < toUsdtUnits(payment.cryptoExpectedAmount)) {
     throw new Error("The received crypto amount is below the expected amount.");
   }
+
+  return true;
+};
+
+const confirmCryptoPayment = async (paymentId, options = {}) => {
+  const payment = await getPaymentById(paymentId);
+  if (!payment?.id) {
+    throw new Error("Payment not found.");
+  }
+  assertCryptoPaymentConfirmable(payment);
 
   return reviewCryptoPayment(payment.id, "paid", {
     createdBy: String(options.createdBy || "crypto-monitor").trim() || "crypto-monitor",
@@ -190,6 +210,7 @@ module.exports = {
   getSupportedPaymentOptions,
   createCryptoPaymentRecord,
   updateCryptoDetection,
+  assertCryptoPaymentConfirmable,
   confirmCryptoPayment,
   createCryptoPayment,
   getCryptoPaymentStatus,

@@ -43,6 +43,19 @@ const createFetch = (rawAmount = "199000000") => async (url) => {
   throw new Error(`Unexpected test URL: ${url}`);
 };
 
+const createMultiTransferFetch = (transfers) => async (url) => {
+  if (url.includes("/wallet/getnowblock")) {
+    return createResponse({ block_header: { raw_data: { number: 100 } } });
+  }
+  if (url.includes("/wallet/gettransactioninfobyid")) {
+    return createResponse({ blockNumber: 80, receipt: { result: "SUCCESS" } });
+  }
+  if (url.includes("/transactions/trc20")) {
+    return createResponse({ data: transfers, meta: {} });
+  }
+  throw new Error(`Unexpected test URL: ${url}`);
+};
+
 const basePayment = {
   id: "payment-1",
   paymentId: "PAY-1",
@@ -118,6 +131,40 @@ const run = async () => {
   const duplicateResult = await duplicateMonitor.runCycle();
   assert.deepStrictEqual(duplicateResult, { checked: 1, detected: 0 });
   assert.strictEqual(duplicateUpdated, false);
+
+  const nextTxHash = "b".repeat(64);
+  const transferRow = (hash, timestamp) => ({
+    transaction_id: hash,
+    to: walletAddress,
+    value: "199000000",
+    block_timestamp: timestamp,
+    token_info: {
+      address: contractAddress,
+      symbol: "USDT",
+      decimals: 6,
+    },
+  });
+  const continuedUpdates = [];
+  const continueAfterDuplicateMonitor = createTronPaymentMonitor({
+    config,
+    logger: silentLogger,
+    fetch: createMultiTransferFetch([
+      transferRow(txHash, Date.now() - 1000),
+      transferRow(nextTxHash, Date.now()),
+    ]),
+    listPendingCryptoPayments: async () => [basePayment],
+    getPaymentByCryptoTxHash: async (hash) =>
+      hash === txHash ? { id: "another-payment" } : null,
+    updateCryptoDetection: async (paymentId, input) => {
+      continuedUpdates.push({ paymentId, input });
+      return { payment: { ...basePayment, ...input, id: paymentId } };
+    },
+    confirmCryptoPayment: async () => ({ ok: true }),
+  });
+  const continueResult = await continueAfterDuplicateMonitor.runCycle();
+  assert.deepStrictEqual(continueResult, { checked: 1, detected: 1 });
+  assert.strictEqual(continuedUpdates.length, 1);
+  assert.strictEqual(continuedUpdates[0].input.txHash, nextTxHash);
 
   let underpaymentUpdated = false;
   const underpaymentMonitor = createTronPaymentMonitor({

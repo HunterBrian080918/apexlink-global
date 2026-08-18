@@ -61,6 +61,17 @@ const requestSupabase = async (tablePath, options = {}) => {
 const escapeFilterValue = (value) => encodeURIComponent(String(value || "").trim());
 const nowIso = () => new Date().toISOString();
 const PAYMENT_STAGE_UNIQUE_INDEX = "payments_order_stage_unique";
+const DEFAULT_CRYPTO_REQUIRED_CONFIRMATIONS = 20;
+const CRYPTO_PAYMENT_PROVIDERS = new Set(["crypto_manual", "crypto_trc20"]);
+const getRequiredCryptoConfirmations = () => {
+  const configured = Number.parseInt(String(process.env.TRON_REQUIRED_CONFIRMATIONS || ""), 10);
+  return Number.isInteger(configured) && configured >= DEFAULT_CRYPTO_REQUIRED_CONFIRMATIONS
+    ? configured
+    : DEFAULT_CRYPTO_REQUIRED_CONFIRMATIONS;
+};
+const isCryptoPaymentRecord = (payment) =>
+  CRYPTO_PAYMENT_PROVIDERS.has(String(payment?.paymentProvider || "").trim().toLowerCase()) ||
+  String(payment?.cryptoAsset || "").trim().toUpperCase() === "USDT";
 const getMissingPaymentColumns = (error) => {
   const message = String(error?.message || "");
   const candidateColumns = [
@@ -694,6 +705,21 @@ const reviewCryptoPayment = async (paymentId, nextStatus, options = {}) => {
     throw new Error("Crypto payment review status must be paid or failed.");
   }
 
+  if (normalizedStatus === "paid") {
+    const existingPayment = await getPaymentById(normalizedPaymentId);
+    if (!existingPayment?.id || !isCryptoPaymentRecord(existingPayment)) {
+      throw new Error("Payment is not a cryptocurrency payment record.");
+    }
+    const requiredConfirmations = getRequiredCryptoConfirmations();
+    if (Number(existingPayment.cryptoConfirmations || 0) < requiredConfirmations) {
+      const confirmationError = new Error(
+        `USDT payment requires at least ${requiredConfirmations} confirmations before approval.`
+      );
+      confirmationError.status = 409;
+      throw confirmationError;
+    }
+  }
+
   let result;
   try {
     result = await requestSupabase("rpc/review_crypto_payment", {
@@ -735,6 +761,18 @@ const updatePayment = async (paymentId, partial, options = {}) => {
   const existing = await getPaymentById(normalizedPaymentId);
   if (!existing?.id) {
     throw new Error("Payment not found.");
+  }
+
+  if (
+    partial?.status !== undefined &&
+    normalizePaymentStatus(partial.status) === "paid" &&
+    isCryptoPaymentRecord(existing)
+  ) {
+    const protectedUpdateError = new Error(
+      "Crypto payments cannot be marked paid through the generic payment update endpoint. Use the verified crypto review flow."
+    );
+    protectedUpdateError.status = 409;
+    throw protectedUpdateError;
   }
 
   const patch = {

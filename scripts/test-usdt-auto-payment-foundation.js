@@ -1,9 +1,15 @@
 const assert = require("assert/strict");
 const fs = require("fs");
 const path = require("path");
+const { assertCryptoPaymentConfirmable } = require("../services/crypto-payments");
 
 const read = (...parts) => fs.readFileSync(path.join(__dirname, "..", ...parts), "utf8");
 const migration = read("supabase", "migrations", "20260817000300_usdt_auto_payment_foundation.sql");
+const confirmationMigration = read(
+  "supabase",
+  "migrations",
+  "20260818000100_crypto_confirmation_enforcement.sql"
+);
 const cryptoService = read("services", "crypto-payments.js");
 const payments = read("services", "supabase-payments.js");
 const server = read("server.js");
@@ -46,6 +52,29 @@ assert.match(cryptoService, /record_crypto_transaction/i);
 assert.match(cryptoService, /CRYPTO_MONITOR_ENABLED/i);
 assert.match(cryptoService, /monitoringEnabled,/i);
 assert.doesNotMatch(cryptoService, /api\.trongrid|tronscan|setInterval|setTimeout/i);
+assert.match(cryptoService, /DEFAULT_REQUIRED_CONFIRMATIONS\s*=\s*20/i);
+assert.match(cryptoService, /assertCryptoPaymentConfirmable/i);
+
+assert.match(confirmationMigration, /create or replace function public\.review_crypto_payment/i);
+assert.match(confirmationMigration, /v_required_confirmations constant integer := 20/i);
+assert.match(confirmationMigration, /crypto_confirmations[\s\S]*v_required_confirmations/i);
+assert.match(confirmationMigration, /security definer/i);
+assert.match(confirmationMigration, /revoke all on function public\.review_crypto_payment[\s\S]*from anon/i);
+assert.match(confirmationMigration, /revoke all on function public\.review_crypto_payment[\s\S]*from authenticated/i);
+assert.match(confirmationMigration, /grant execute on function public\.review_crypto_payment[\s\S]*service_role/i);
+
+const confirmablePayment = {
+  cryptoStatus: "confirming",
+  cryptoTxHash: "a".repeat(64),
+  cryptoConfirmations: 20,
+  cryptoReceivedAmount: 199,
+  cryptoExpectedAmount: 199,
+};
+assert.equal(assertCryptoPaymentConfirmable(confirmablePayment, 20), true);
+assert.throws(
+  () => assertCryptoPaymentConfirmable({ ...confirmablePayment, cryptoConfirmations: 19 }, 20),
+  /requires at least 20 confirmations/i
+);
 
 assert.match(payments, /cryptoExpectedAmount:/i);
 assert.match(payments, /cryptoReceivedAmount:/i);
@@ -54,6 +83,8 @@ assert.match(payments, /cryptoConfirmations:/i);
 assert.match(payments, /cryptoDetectedAt:/i);
 assert.match(payments, /cryptoStatus:/i);
 assert.doesNotMatch(payments, /crypto_amount/i);
+assert.match(payments, /USDT payment requires at least[\s\S]*confirmations before approval/i);
+assert.match(payments, /cannot be marked paid through the generic payment update endpoint/i);
 assert.match(server, /cryptoTxHash:\s*txHash/i);
 assert.doesNotMatch(server, /transactionId:\s*txHash/i);
 assert.match(paymentPage, /activePayment\?\.cryptoTxHash/i);

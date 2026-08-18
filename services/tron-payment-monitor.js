@@ -294,6 +294,13 @@ const createTronPaymentMonitor = (options = {}) => {
           if (payment.cryptoTxHash) {
             const expectedHash = normalizeText(payment.cryptoTxHash).toLowerCase();
             transfer = (await loadWalletTransfers(wallet)).find((item) => item.txHash === expectedHash) || null;
+            if (!transfer || !isMatchingTransfer(payment, transfer, config)) {
+              continue;
+            }
+            reservedTxHashes.add(transfer.txHash);
+            if (await processDetectedTransaction(payment, transfer, currentBlock)) {
+              detected += 1;
+            }
           } else {
             const candidates = (await loadWalletTransfers(wallet))
               .filter(
@@ -301,15 +308,14 @@ const createTronPaymentMonitor = (options = {}) => {
                   !reservedTxHashes.has(item.txHash) && isMatchingTransfer(payment, item, config)
               )
               .sort((left, right) => left.timestamp - right.timestamp);
-            transfer = candidates[0] || null;
-          }
-
-          if (!transfer || !isMatchingTransfer(payment, transfer, config)) {
-            continue;
-          }
-          reservedTxHashes.add(transfer.txHash);
-          if (await processDetectedTransaction(payment, transfer, currentBlock)) {
-            detected += 1;
+            for (const candidate of candidates) {
+              reservedTxHashes.add(candidate.txHash);
+              if (await processDetectedTransaction(payment, candidate, currentBlock)) {
+                transfer = candidate;
+                detected += 1;
+                break;
+              }
+            }
           }
         } catch (error) {
           logError(`Unable to process payment ${payment.paymentId || payment.id}`, error);
@@ -370,7 +376,18 @@ const createTronPaymentMonitor = (options = {}) => {
   return { start, stop, runCycle, config };
 };
 
-const productionMonitor = createTronPaymentMonitor();
+let productionMonitor = null;
+
+const getProductionMonitor = () => {
+  if (!productionMonitor) {
+    productionMonitor = createTronPaymentMonitor();
+  }
+  return productionMonitor;
+};
+
+const startTronPaymentMonitor = () => getProductionMonitor().start();
+const stopTronPaymentMonitor = () => productionMonitor?.stop();
+const getProductionTronMonitorConfiguration = () => getProductionMonitor().config;
 
 module.exports = {
   getTronMonitorConfiguration,
@@ -380,6 +397,7 @@ module.exports = {
   parseTrc20Transfer,
   isMatchingTransfer,
   createTronPaymentMonitor,
-  startTronPaymentMonitor: productionMonitor.start,
-  stopTronPaymentMonitor: productionMonitor.stop,
+  getProductionTronMonitorConfiguration,
+  startTronPaymentMonitor,
+  stopTronPaymentMonitor,
 };
